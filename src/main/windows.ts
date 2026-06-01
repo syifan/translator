@@ -43,7 +43,7 @@ export function createControlWindow(): BrowserWindow {
 export function createOverlayWindow(): BrowserWindow {
   const { workArea } = screen.getPrimaryDisplay()
   const width = Math.min(1100, workArea.width - 80)
-  const height = 220
+  const height = 320
 
   const win = new BrowserWindow({
     width,

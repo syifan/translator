@@ -5,6 +5,8 @@ export interface TranscriptionOptions {
   model: string
   /** "auto" => let the model detect the language. */
   languageHint: string
+  /** Server-VAD silence (ms) before a segment is finalized. */
+  silenceMs: number
   onOpen: () => void
   onDelta: (itemId: string, fullText: string) => void
   onCompleted: (itemId: string, fullText: string) => void
@@ -31,6 +33,12 @@ export class TranscriptionClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   /** Accumulated text per transcription item id. */
   private partials = new Map<string, string>()
+  // Diagnostics
+  private framesSent = 0
+  private framesDropped = 0
+  private bytesSent = 0
+  private peak = 0
+  private gotFirstDelta = false
 
   constructor(private opts: TranscriptionOptions) {}
 
@@ -84,8 +92,10 @@ export class TranscriptionClient {
     })
   }
 
-  setLanguageHint(lang: string): void {
-    this.opts.languageHint = lang
+  /** Update language/VAD config on a live session (re-sends session.update). */
+  configure(patch: { languageHint?: string; silenceMs?: number }): void {
+    if (patch.languageHint !== undefined) this.opts.languageHint = patch.languageHint
+    if (patch.silenceMs !== undefined) this.opts.silenceMs = patch.silenceMs
     this.sendSessionUpdate()
   }
 
@@ -108,7 +118,7 @@ export class TranscriptionClient {
             turn_detection: {
               type: 'server_vad',
               threshold: 0.5,
-              silence_duration_ms: 500,
+              silence_duration_ms: this.opts.silenceMs,
             },
           },
         },
@@ -126,9 +136,29 @@ export class TranscriptionClient {
 
   /** Append a chunk of 24kHz mono PCM16 audio (little-endian). */
   sendAudio(buf: ArrayBuffer): void {
-    if (this.ws?.readyState !== WebSocket.OPEN) return
-    const base64 = Buffer.from(buf).toString('base64')
-    this.ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 }))
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      this.framesDropped++
+      return
+    }
+    const nodeBuf = Buffer.from(buf as ArrayBuffer)
+    this.ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: nodeBuf.toString('base64') }))
+    this.framesSent++
+    this.bytesSent += nodeBuf.byteLength
+
+    // Diagnostic: track peak amplitude so we can tell "silent capture" from
+    // "audio flowing but not transcribed". Logged ~once/10s.
+    const i16 = new Int16Array(nodeBuf.buffer, nodeBuf.byteOffset, Math.floor(nodeBuf.byteLength / 2))
+    for (let i = 0; i < i16.length; i += 7) {
+      const a = Math.abs(i16[i])
+      if (a > this.peak) this.peak = a
+    }
+    if (this.framesSent % 100 === 0) {
+      console.log(
+        `[transcription] audio: ${this.framesSent} frames, ${Math.round(this.bytesSent / 1024)} KB sent, ` +
+          `${this.framesDropped} dropped(pre-open), peak level ${Math.round((this.peak / 32768) * 100)}%`,
+      )
+      this.peak = 0
+    }
   }
 
   private handleMessage(data: WebSocket.RawData): void {
@@ -139,8 +169,18 @@ export class TranscriptionClient {
       return
     }
 
+    // Diagnostic: log every non-delta event the server sends (session acks,
+    // VAD speech_started/stopped/committed, completed, error).
+    if (typeof msg.type === 'string' && !msg.type.endsWith('.delta')) {
+      console.log('[transcription] <<', msg.type)
+    }
+
     switch (msg.type) {
       case 'conversation.item.input_audio_transcription.delta': {
+        if (!this.gotFirstDelta) {
+          this.gotFirstDelta = true
+          console.log('[transcription] first transcript delta received')
+        }
         const id: string = msg.item_id ?? 'live'
         const next = (this.partials.get(id) ?? '') + (msg.delta ?? '')
         this.partials.set(id, next)

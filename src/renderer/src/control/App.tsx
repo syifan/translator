@@ -175,6 +175,14 @@ export function App() {
           disabled={active}
           onChange={(v) => update({ micEnabled: v })}
         />
+        <Field label={`Sentence pause — ${settings.vadSilenceMs}ms`}>
+          <input
+            style={S.slider} type="range" min={100} max={800} step={50}
+            value={settings.vadSilenceMs}
+            onChange={(e) => update({ vadSilenceMs: Number(e.target.value) })}
+          />
+        </Field>
+        <p style={S.hint}>Shorter pause = sentences finalize &amp; translate sooner (but may split mid-thought).</p>
       </Section>
 
       <Section title="Overlay">
@@ -197,6 +205,13 @@ export function App() {
             style={S.slider} type="range" min={2} max={20} step={1}
             value={settings.holdSeconds}
             onChange={(e) => update({ holdSeconds: Number(e.target.value) })}
+          />
+        </Field>
+        <Field label={`Lines shown — ${settings.maxLines}`}>
+          <input
+            style={S.slider} type="range" min={1} max={5} step={1}
+            value={settings.maxLines}
+            onChange={(e) => update({ maxLines: Number(e.target.value) })}
           />
         </Field>
         <Toggle

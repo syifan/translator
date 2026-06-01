@@ -10,6 +10,8 @@ export interface Settings {
   transcribeModel: string
   /** Chat model used for translation. */
   translateModel: string
+  /** Server-VAD silence (ms) before a sentence is finalized. Lower = snappier. */
+  vadSilenceMs: number
   /** Mix the microphone into the captured audio. */
   micEnabled: boolean
   /** Overlay translation font size in px. */
@@ -18,7 +20,7 @@ export interface Settings {
   opacity: number
   /** How long (seconds) the last subtitle stays on screen after updates stop. */
   holdSeconds: number
-  /** Reserved for future multi-line history. */
+  /** Number of recent sentences kept on the overlay at once. */
   maxLines: number
   /** Show the original (untranslated) line above the translation. */
   showOriginal: boolean
@@ -29,11 +31,12 @@ export const DEFAULT_SETTINGS: Settings = {
   sourceLang: 'auto',
   transcribeModel: 'gpt-4o-transcribe',
   translateModel: 'gpt-4o-mini',
+  vadSilenceMs: 300,
   micEnabled: false,
   fontSize: 30,
   opacity: 0.55,
   holdSeconds: 6,
-  maxLines: 2,
+  maxLines: 3,
   showOriginal: true,
 }
 
