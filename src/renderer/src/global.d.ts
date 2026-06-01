@@ -27,6 +27,7 @@ declare global {
     overlay: {
       onSubtitle(cb: (p: SubtitlePayload) => void): () => void
       onConfig(cb: (c: OverlayConfig) => void): () => void
+      onStatus(cb: (s: SessionStatus) => void): () => void
     }
   }
 }

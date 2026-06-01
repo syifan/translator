@@ -62,7 +62,6 @@ export class SessionManager {
       languageHint: this.settings.sourceLang,
       onOpen: () => {
         this.setStatus({ state: 'running' })
-        this.showOverlay()
       },
       onDelta: (id, text) => this.onDelta(id, text),
       onCompleted: (id, text) => void this.onCompleted(id, text),
@@ -140,6 +139,11 @@ export class SessionManager {
   private setStatus(status: SessionStatus): void {
     this.status = status
     this.send(this.windows.control, IPC.statusChanged, status)
+    // Mirror to the overlay so it can show "Connecting…/Listening…" feedback,
+    // and drive overlay visibility from the session state.
+    this.send(this.windows.overlay, IPC.overlayStatus, status)
+    if (status.state === 'starting' || status.state === 'running') this.showOverlay()
+    else this.hideOverlay()
   }
 
   private pushOverlayConfig(): void {

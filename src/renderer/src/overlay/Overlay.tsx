@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { OverlayConfig, SubtitlePayload } from '@shared/ipc'
+import type { OverlayConfig, SessionStatus, SubtitlePayload } from '@shared/ipc'
 
 const DEFAULT_CONFIG: OverlayConfig = {
   fontSize: 30,
@@ -14,6 +14,7 @@ const EMPTY: SubtitlePayload = { itemId: '', original: '', translation: '', isFi
 export function Overlay() {
   const [sub, setSub] = useState<SubtitlePayload>(EMPTY)
   const [cfg, setCfg] = useState<OverlayConfig>(DEFAULT_CONFIG)
+  const [status, setStatus] = useState<SessionStatus>({ state: 'idle' })
 
   // Keep the latest hold time reachable from the mount-only subtitle listener.
   const holdRef = useRef(cfg.holdSeconds)
@@ -32,17 +33,32 @@ export function Overlay() {
       clearTimer = setTimeout(() => setSub(EMPTY), Math.max(1, holdRef.current) * 1000)
     })
     const offCfg = window.overlay.onConfig((c) => setCfg(c))
+    const offStatus = window.overlay.onStatus((s) => setStatus(s))
     return () => {
       offSub()
       offCfg()
+      offStatus()
       if (clearTimer) clearTimeout(clearTimer)
     }
   }, [])
 
-  const hasContent = sub.original || sub.translation
-  if (!hasContent) return null
-
   const bg = `rgba(0, 0, 0, ${cfg.opacity})`
+  const hasContent = sub.original || sub.translation
+
+  // No caption yet: show a small status hint while the session is active so the
+  // overlay never looks dead. (Helps tell "no audio/speech" from "broken".)
+  if (!hasContent) {
+    const hint =
+      status.state === 'running' ? '● Listening…' : status.state === 'starting' ? 'Connecting…' : null
+    if (!hint) return null
+    return (
+      <div style={{ position: 'fixed', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'flex-end', padding: 18, pointerEvents: 'none', fontFamily: '-apple-system, system-ui, sans-serif' }}>
+        <div style={{ background: bg, color: '#cfd4de', fontSize: 14, fontWeight: 600, padding: '4px 12px', borderRadius: 999, opacity: 0.85 }}>
+          {hint}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div

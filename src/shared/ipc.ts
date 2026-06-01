@@ -87,6 +87,7 @@ export const IPC = {
   // main -> overlay window (send)
   subtitleUpdate: 'subtitle:update',
   overlayConfig: 'overlay:config',
+  overlayStatus: 'overlay:status',
 
   // electron-audio-loopback registers these on ipcMain (do not rename):
   enableLoopback: 'enable-loopback-audio',
