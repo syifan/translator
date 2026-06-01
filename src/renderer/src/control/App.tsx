@@ -109,6 +109,8 @@ export function App() {
     return <div style={S.loading}>Loading…</div>
   }
 
+  const usingRealtime = Boolean(REALTIME_TRANSLATE_CODES[settings.targetLang])
+
   return (
     <div style={S.page}>
       <header style={S.header}>
@@ -227,12 +229,19 @@ export function App() {
       </Section>
 
       <Section title="Models">
+        {usingRealtime ? (
+          <p style={S.hint}>
+            ⚡ <b>{settings.targetLang}</b> uses the real-time engine — it already runs the newest
+            models (<code>gpt-realtime-whisper</code> + <code>gpt-realtime-translate</code>). The
+            models below only apply to the Standard fallback engine.
+          </p>
+        ) : null}
         <Field label="Transcription (speech-to-text)">
           <Combo
             listId="transcribe-models"
             value={settings.transcribeModel}
             options={TRANSCRIBE_MODELS}
-            disabled={active}
+            disabled={active || usingRealtime}
             onChange={(v) => update({ transcribeModel: v })}
           />
         </Field>
@@ -241,11 +250,15 @@ export function App() {
             listId="translate-models"
             value={settings.translateModel}
             options={TRANSLATE_MODELS}
-            disabled={active}
+            disabled={active || usingRealtime}
             onChange={(v) => update({ translateModel: v })}
           />
         </Field>
-        <p style={S.hint}>Type any model your API key can access — the list is just suggestions.</p>
+        <p style={S.hint}>
+          {usingRealtime
+            ? 'gpt-4o-transcribe is still OpenAI’s current non-realtime STT family — there is no “gpt-5-transcribe.”'
+            : 'Type any model your API key can access — the list is just suggestions.'}
+        </p>
       </Section>
 
       <div style={S.footer}>
