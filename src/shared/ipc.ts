@@ -40,6 +40,28 @@ export const DEFAULT_SETTINGS: Settings = {
   showOriginal: true,
 }
 
+/**
+ * Target languages supported by gpt-realtime-translate (its 13 output
+ * languages), mapped to ISO codes. A target in this map uses the low-latency
+ * realtime translate engine; anything else falls back to transcribe+translate.
+ */
+export const REALTIME_TRANSLATE_CODES: Record<string, string> = {
+  English: 'en',
+  Spanish: 'es',
+  Portuguese: 'pt',
+  French: 'fr',
+  German: 'de',
+  Italian: 'it',
+  Japanese: 'ja',
+  Korean: 'ko',
+  Russian: 'ru',
+  Hindi: 'hi',
+  Indonesian: 'id',
+  Vietnamese: 'vi',
+  'Chinese (Simplified)': 'zh',
+  'Chinese (Traditional)': 'zh',
+}
+
 export type SessionState = 'idle' | 'starting' | 'running' | 'error'
 
 export interface SessionStatus {

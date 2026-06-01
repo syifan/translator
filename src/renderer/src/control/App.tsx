@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { SessionStatus, Settings } from '@shared/ipc'
+import { REALTIME_TRANSLATE_CODES, type SessionStatus, type Settings } from '@shared/ipc'
 import { isCapturing, startCapture, stopCapture } from './capture'
 
 const LANGUAGES = [
@@ -151,12 +151,17 @@ export function App() {
 
       <Section title="Languages">
         <Field label="Translate into">
-          <select style={S.select} value={settings.targetLang} onChange={(e) => update({ targetLang: e.target.value })}>
+          <select style={S.select} value={settings.targetLang} disabled={active} onChange={(e) => update({ targetLang: e.target.value })}>
             {LANGUAGES.map((l) => (
               <option key={l} value={l}>{l}</option>
             ))}
           </select>
         </Field>
+        <p style={S.hint}>
+          {REALTIME_TRANSLATE_CODES[settings.targetLang]
+            ? '⚡ Real-time engine (gpt-realtime-translate) — lowest latency.'
+            : 'Standard engine (transcribe + translate) — this target isn’t supported by the real-time model.'}
+        </p>
         <Field label="Spoken language">
           <select style={S.select} value={settings.sourceLang} onChange={(e) => update({ sourceLang: e.target.value })}>
             <option value="auto">Auto-detect</option>

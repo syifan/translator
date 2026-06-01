@@ -1,6 +1,7 @@
 import type { BrowserWindow } from 'electron'
 import {
   IPC,
+  REALTIME_TRANSLATE_CODES,
   type OverlayConfig,
   type SessionStatus,
   type Settings,
@@ -10,6 +11,7 @@ import { store } from './store'
 import { getKey } from './secrets'
 import { TranscriptionClient } from './openai/transcription'
 import { Translator } from './openai/translation'
+import { RealtimeTranslateClient } from './openai/realtime-translate'
 
 interface Windows {
   control: BrowserWindow
@@ -23,10 +25,15 @@ interface Windows {
 export class SessionManager {
   private transcription: TranscriptionClient | null = null
   private translator: Translator | null = null
+  private rt: RealtimeTranslateClient | null = null
   private settings: Settings
   private status: SessionStatus = { state: 'idle' }
   /** Per-transcription-item: how many complete sentences we've already emitted. */
   private segments = new Map<string, { committed: number }>()
+  // Realtime-translate rolling buffers.
+  private rtSrc = ''
+  private rtTrans = ''
+  private rtLastDelta = 0
 
   constructor(private windows: Windows) {
     this.settings = store.get()
@@ -37,6 +44,8 @@ export class SessionManager {
     this.pushOverlayConfig()
     this.translator?.setTarget(next.targetLang)
     this.transcription?.configure({ languageHint: next.sourceLang, silenceMs: next.vadSilenceMs })
+    const code = REALTIME_TRANSLATE_CODES[next.targetLang]
+    if (this.rt && code) this.rt.setTarget(code)
   }
 
   isActive(): boolean {
@@ -55,20 +64,56 @@ export class SessionManager {
     this.settings = store.get()
     this.setStatus({ state: 'starting' })
     this.pushOverlayConfig()
-
-    this.translator = new Translator(key, this.settings.translateModel, this.settings.targetLang)
-
     this.segments.clear()
+    this.rtSrc = ''
+    this.rtTrans = ''
+
+    const targetCode = REALTIME_TRANSLATE_CODES[this.settings.targetLang]
+    if (targetCode) {
+      this.startRealtime(key, targetCode)
+    } else {
+      this.startClassic(key)
+    }
+  }
+
+  /** Low-latency path: gpt-realtime-translate streams source + translation. */
+  private startRealtime(key: string, targetCode: string): void {
+    console.log('[session] engine: realtime-translate ->', targetCode)
+    this.rt = new RealtimeTranslateClient({
+      apiKey: key,
+      targetCode,
+      onOpen: () => this.setStatus({ state: 'running' }),
+      onSourceDelta: (d) => {
+        this.rtTouch()
+        this.rtSrc += d
+        this.emitRtLive()
+      },
+      onTranslationDelta: (d) => {
+        this.rtTouch()
+        this.rtTrans += d
+        this.emitRtLive()
+      },
+      onError: (message) => this.setStatus({ state: 'error', message }),
+      onClose: () => {
+        this.hideOverlay()
+        if (this.status.state !== 'error') this.setStatus({ state: 'idle' })
+      },
+    })
+    this.rt.connect()
+  }
+
+  /** Fallback path: realtime transcription + chat-completions translation. */
+  private startClassic(key: string): void {
+    console.log('[session] engine: transcribe + translate (target not realtime-supported)')
+    this.translator = new Translator(key, this.settings.translateModel, this.settings.targetLang)
     this.transcription = new TranscriptionClient({
       apiKey: key,
       model: this.settings.transcribeModel,
       languageHint: this.settings.sourceLang,
       silenceMs: this.settings.vadSilenceMs,
-      onOpen: () => {
-        this.setStatus({ state: 'running' })
-      },
+      onOpen: () => this.setStatus({ state: 'running' }),
       onDelta: (id, text) => this.onDelta(id, text),
-      onCompleted: (id, text) => void this.onCompleted(id, text),
+      onCompleted: (id, text) => this.onCompleted(id, text),
       onError: (message) => this.setStatus({ state: 'error', message }),
       onClose: () => {
         this.hideOverlay()
@@ -78,11 +123,29 @@ export class SessionManager {
     this.transcription.connect()
   }
 
+  /** Reset rolling buffers if there was a long pause (new utterance). */
+  private rtTouch(): void {
+    const now = Date.now()
+    if (now - this.rtLastDelta > 2500) {
+      this.rtSrc = ''
+      this.rtTrans = ''
+    }
+    this.rtLastDelta = now
+  }
+
+  private emitRtLive(): void {
+    this.emitUnit('rt:live', tailText(this.rtSrc), tailText(this.rtTrans), false)
+  }
+
   stop(): void {
     this.transcription?.close()
     this.transcription = null
+    this.rt?.close()
+    this.rt = null
     this.translator = null
     this.segments.clear()
+    this.rtSrc = ''
+    this.rtTrans = ''
     this.hideOverlay()
     // Ask the renderer to tear down the audio capture graph too.
     this.send(this.windows.control, IPC.captureCommand, { action: 'stop' })
@@ -91,12 +154,15 @@ export class SessionManager {
 
   pushAudio(buf: ArrayBuffer): void {
     this.transcription?.sendAudio(buf)
+    this.rt?.sendAudio(buf)
   }
 
   onCaptureError(message: string): void {
     this.setStatus({ state: 'error', message })
     this.transcription?.close()
     this.transcription = null
+    this.rt?.close()
+    this.rt = null
     this.hideOverlay()
   }
 
@@ -212,4 +278,10 @@ function splitSentences(text: string): { sentences: string[]; tail: string } {
     lastIndex = re.lastIndex
   }
   return { sentences, tail: text.slice(lastIndex).trim() }
+}
+
+/** The most recent `maxSentences` complete sentences plus any in-progress tail. */
+function tailText(text: string, maxSentences = 2): string {
+  const { sentences, tail } = splitSentences(text)
+  return [...sentences.slice(-maxSentences), tail].filter(Boolean).join(' ')
 }
