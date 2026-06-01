@@ -1,0 +1,47 @@
+name: Release
+
+# Build a macOS .dmg and attach it to a GitHub Release whenever a version tag
+# is pushed, e.g.:  git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # needed to create the release and upload assets
+
+jobs:
+  build-macos:
+    runs-on: macos-latest # Apple Silicon runner -> arm64 build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate tray icon
+        run: npm run gen:icons
+
+      - name: Build and package (.dmg, unsigned)
+        env:
+          # No signing certs in CI: build an ad-hoc-signed, unsigned .dmg.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          npm run build
+          npx electron-builder --mac dmg --publish never
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            Unsigned macOS build (Apple Silicon). On first launch, right-click the
+            app → **Open** to bypass Gatekeeper, or run
+            `xattr -dr com.apple.quarantine "/Applications/Live Translator.app"`.
