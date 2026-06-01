@@ -1,0 +1,82 @@
+import { BrowserWindow, screen } from 'electron'
+import { join } from 'node:path'
+
+const isDev = !!process.env.ELECTRON_RENDERER_URL
+
+function loadPage(win: BrowserWindow, page: string): void {
+  if (process.env.ELECTRON_RENDERER_URL) {
+    void win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/${page}.html`)
+  } else {
+    void win.loadFile(join(__dirname, `../renderer/${page}.html`))
+  }
+}
+
+function preloadPath(name: string): string {
+  return join(__dirname, `../preload/${name}.js`)
+}
+
+export function createControlWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 440,
+    height: 720,
+    minWidth: 380,
+    minHeight: 560,
+    title: 'Live Translator',
+    show: false,
+    backgroundColor: '#0b0f1a',
+    webPreferences: {
+      preload: preloadPath('control'),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      // Keep the audio worklet running while the window is hidden in the tray.
+      backgroundThrottling: false,
+    },
+  })
+
+  win.once('ready-to-show', () => win.show())
+  if (isDev) win.webContents.openDevTools({ mode: 'detach' })
+  loadPage(win, 'control')
+  return win
+}
+
+export function createOverlayWindow(): BrowserWindow {
+  const { workArea } = screen.getPrimaryDisplay()
+  const width = Math.min(1100, workArea.width - 80)
+  const height = 220
+
+  const win = new BrowserWindow({
+    width,
+    height,
+    x: Math.round(workArea.x + (workArea.width - width) / 2),
+    y: Math.round(workArea.y + workArea.height - height - 48),
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    focusable: false,
+    show: false,
+    webPreferences: {
+      preload: preloadPath('overlay'),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+    },
+  })
+
+  // Float above everything, including other apps' fullscreen windows.
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  // Click-through: pointer events pass to the app underneath.
+  win.setIgnoreMouseEvents(true, { forward: true })
+
+  loadPage(win, 'overlay')
+  return win
+}

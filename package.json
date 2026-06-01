@@ -1,0 +1,36 @@
+{
+  "name": "live-translator",
+  "version": "0.1.0",
+  "description": "Live system-audio subtitle translator overlay (Electron + OpenAI Realtime)",
+  "type": "commonjs",
+  "main": "./out/main/index.js",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "gen:icons": "node scripts/gen-tray.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "package:dir": "npm run build && electron-builder --mac --dir",
+    "dist": "npm run build && electron-builder --mac"
+  },
+  "dependencies": {
+    "electron-audio-loopback": "^1.0.6",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^42.3.0",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^5.0.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.5"
+  }
+}

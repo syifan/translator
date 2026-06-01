@@ -1,0 +1,21 @@
+appId: com.livetranslator.app
+productName: Live Translator
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**/*
+  - resources/**/*
+  - package.json
+mac:
+  category: public.app-category.utilities
+  target:
+    - dmg
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: Live Translator mixes your microphone into the audio it transcribes when you enable it.
+    NSAudioCaptureUsageDescription: Live Translator captures system audio to transcribe and translate what you hear.
+    NSScreenCaptureUsageDescription: System audio capture on macOS is provided through the screen-recording API; no screen contents are recorded.
