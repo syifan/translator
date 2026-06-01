@@ -9,8 +9,18 @@ const LANGUAGES = [
   'Polish', 'Ukrainian', 'Indonesian', 'Swedish', 'Greek', 'Hebrew',
 ]
 
-const TRANSCRIBE_MODELS = ['gpt-4o-transcribe', 'gpt-4o-mini-transcribe']
-const TRANSLATE_MODELS = ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1']
+// Suggestions only — the fields accept any model name your key can access.
+// gpt-4o-transcribe works with automatic (server-VAD) segmentation, which is
+// what the pipeline uses. gpt-realtime-whisper needs manual buffer commits, so
+// it's intentionally not a default/suggestion yet.
+const TRANSCRIBE_MODELS = ['gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'whisper-1']
+const TRANSLATE_MODELS = [
+  'gpt-4o-mini',
+  'gpt-5.4-mini',
+  'gpt-5.4-nano',
+  'gpt-5.5',
+  'gpt-5-chat-latest',
+]
 
 const STATUS_META: Record<SessionStatus['state'], { label: string; color: string }> = {
   idle: { label: 'Idle', color: '#7b8499' },
@@ -190,16 +200,25 @@ export function App() {
       </Section>
 
       <Section title="Models">
-        <Field label="Transcription">
-          <select style={S.select} value={settings.transcribeModel} disabled={active} onChange={(e) => update({ transcribeModel: e.target.value })}>
-            {TRANSCRIBE_MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
+        <Field label="Transcription (speech-to-text)">
+          <Combo
+            listId="transcribe-models"
+            value={settings.transcribeModel}
+            options={TRANSCRIBE_MODELS}
+            disabled={active}
+            onChange={(v) => update({ transcribeModel: v })}
+          />
         </Field>
-        <Field label="Translation">
-          <select style={S.select} value={settings.translateModel} onChange={(e) => update({ translateModel: e.target.value })}>
-            {TRANSLATE_MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
+        <Field label="Translation (chat model)">
+          <Combo
+            listId="translate-models"
+            value={settings.translateModel}
+            options={TRANSLATE_MODELS}
+            disabled={active}
+            onChange={(v) => update({ translateModel: v })}
+          />
         </Field>
+        <p style={S.hint}>Type any model your API key can access — the list is just suggestions.</p>
       </Section>
 
       <div style={S.footer}>
@@ -259,6 +278,33 @@ function Toggle(props: {
         style={S.checkbox}
       />
     </label>
+  )
+}
+
+function Combo(props: {
+  listId: string
+  value: string
+  options: string[]
+  disabled?: boolean
+  onChange: (v: string) => void
+}) {
+  return (
+    <>
+      <input
+        style={S.select}
+        list={props.listId}
+        value={props.value}
+        disabled={props.disabled}
+        spellCheck={false}
+        autoComplete="off"
+        onChange={(e) => props.onChange(e.target.value)}
+      />
+      <datalist id={props.listId}>
+        {props.options.map((o) => (
+          <option key={o} value={o} />
+        ))}
+      </datalist>
+    </>
   )
 }
 

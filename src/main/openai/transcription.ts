@@ -39,7 +39,8 @@ export class TranscriptionClient {
     const ws = new WebSocket(REALTIME_URL, {
       headers: {
         Authorization: `Bearer ${this.opts.apiKey}`,
-        'OpenAI-Beta': 'realtime=v1',
+        // NOTE: the GA Realtime API rejects the old `OpenAI-Beta: realtime=v1`
+        // header ("The Realtime Beta API is no longer supported"). Do not add it.
       },
     })
     this.ws = ws
@@ -117,7 +118,9 @@ export class TranscriptionClient {
 
   private sendSessionUpdate(): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(this.sessionConfig()))
+      const config = this.sessionConfig()
+      console.log('[transcription] session.update ->', JSON.stringify(config))
+      this.ws.send(JSON.stringify(config))
     }
   }
 
@@ -151,9 +154,18 @@ export class TranscriptionClient {
         this.opts.onCompleted(id, text)
         break
       }
+      case 'transcription_session.created':
+      case 'transcription_session.updated':
+      case 'session.created':
+      case 'session.updated':
+        console.log(`[transcription] ${msg.type}`)
+        break
       case 'error': {
-        const m = msg.error?.message ?? 'Unknown transcription error'
-        this.opts.onError(`Transcription error: ${m}`)
+        console.error('[transcription] error event:', JSON.stringify(msg))
+        const err = msg.error ?? {}
+        const code = err.code ? ` (${err.code})` : ''
+        const m = err.message ?? 'Unknown transcription error'
+        this.opts.onError(`Transcription error${code}: ${m}`)
         break
       }
       default:

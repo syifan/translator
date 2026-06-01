@@ -19,9 +19,13 @@ control window (settings + audio capture)        overlay window (transparent, cl
    Realtime WS transcription  ─▶  Chat Completions translation
 ```
 
-- **Transcription:** OpenAI Realtime API transcription session (`gpt-4o-transcribe`),
-  streaming over a WebSocket from the main process.
-- **Translation:** streamed Chat Completions (`gpt-4o-mini` by default).
+- **Transcription:** OpenAI Realtime API (GA) transcription session (default
+  `gpt-4o-transcribe`, automatic server-VAD segmentation), over a WebSocket from
+  the main process.
+- **Translation:** streamed Chat Completions (default `gpt-4o-mini`).
+- Both model fields are **editable** — type any model your key can access (e.g.
+  `gpt-5.4-mini`); the dropdowns are just suggestions, so newer models work
+  without an app update.
 - **System audio:** captured via Electron's loopback support (Apple's
   ScreenCaptureKit / CoreAudio Tap) — no virtual audio driver needed.
 
