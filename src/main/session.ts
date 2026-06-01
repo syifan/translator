@@ -117,7 +117,11 @@ export class SessionManager {
         isFinal,
       } satisfies SubtitlePayload)
 
-    if (!text || !this.translator) {
+    // Silent/empty segments (pauses, noise): keep the previous subtitle on
+    // screen instead of blanking the overlay.
+    if (!text) return
+
+    if (!this.translator) {
       emit('', true)
       return
     }
@@ -142,6 +146,7 @@ export class SessionManager {
     this.send(this.windows.overlay, IPC.overlayConfig, {
       fontSize: this.settings.fontSize,
       opacity: this.settings.opacity,
+      holdSeconds: this.settings.holdSeconds,
       maxLines: this.settings.maxLines,
       showOriginal: this.settings.showOriginal,
     } satisfies OverlayConfig)

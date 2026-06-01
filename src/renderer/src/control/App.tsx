@@ -192,6 +192,13 @@ export function App() {
             onChange={(e) => update({ opacity: Number(e.target.value) })}
           />
         </Field>
+        <Field label={`Keep on screen — ${settings.holdSeconds}s`}>
+          <input
+            style={S.slider} type="range" min={2} max={20} step={1}
+            value={settings.holdSeconds}
+            onChange={(e) => update({ holdSeconds: Number(e.target.value) })}
+          />
+        </Field>
         <Toggle
           label="Show original text"
           checked={settings.showOriginal}

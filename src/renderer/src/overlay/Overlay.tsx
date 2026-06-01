@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { OverlayConfig, SubtitlePayload } from '@shared/ipc'
 
 const DEFAULT_CONFIG: OverlayConfig = {
   fontSize: 30,
   opacity: 0.55,
+  holdSeconds: 6,
   maxLines: 2,
   showOriginal: true,
 }
@@ -14,12 +15,27 @@ export function Overlay() {
   const [sub, setSub] = useState<SubtitlePayload>(EMPTY)
   const [cfg, setCfg] = useState<OverlayConfig>(DEFAULT_CONFIG)
 
+  // Keep the latest hold time reachable from the mount-only subtitle listener.
+  const holdRef = useRef(cfg.holdSeconds)
   useEffect(() => {
-    const offSub = window.overlay.onSubtitle((p) => setSub(p))
+    holdRef.current = cfg.holdSeconds
+  }, [cfg.holdSeconds])
+
+  useEffect(() => {
+    let clearTimer: ReturnType<typeof setTimeout> | null = null
+    const offSub = window.overlay.onSubtitle((p) => {
+      // Ignore blank payloads so a pause never wipes the caption.
+      if (!p.original && !p.translation) return
+      setSub(p)
+      // Clear only after `holdSeconds` of no further updates.
+      if (clearTimer) clearTimeout(clearTimer)
+      clearTimer = setTimeout(() => setSub(EMPTY), Math.max(1, holdRef.current) * 1000)
+    })
     const offCfg = window.overlay.onConfig((c) => setCfg(c))
     return () => {
       offSub()
       offCfg()
+      if (clearTimer) clearTimeout(clearTimer)
     }
   }, [])
 

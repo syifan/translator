@@ -16,6 +16,8 @@ export interface Settings {
   fontSize: number
   /** Overlay caption background opacity (0..1). */
   opacity: number
+  /** How long (seconds) the last subtitle stays on screen after updates stop. */
+  holdSeconds: number
   /** Reserved for future multi-line history. */
   maxLines: number
   /** Show the original (untranslated) line above the translation. */
@@ -30,6 +32,7 @@ export const DEFAULT_SETTINGS: Settings = {
   micEnabled: false,
   fontSize: 30,
   opacity: 0.55,
+  holdSeconds: 6,
   maxLines: 2,
   showOriginal: true,
 }
@@ -53,6 +56,7 @@ export interface SubtitlePayload {
 export interface OverlayConfig {
   fontSize: number
   opacity: number
+  holdSeconds: number
   maxLines: number
   showOriginal: boolean
 }
