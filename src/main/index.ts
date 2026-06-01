@@ -19,6 +19,10 @@ if (!app.requestSingleInstanceLock()) {
   let overlay: BrowserWindow | undefined
 
   app.whenReady().then(() => {
+    // Show in BOTH the Dock and the menu bar (Tray). Explicitly show the Dock
+    // icon so we never depend on default activation policy.
+    if (process.platform === 'darwin') app.dock?.show()
+
     control = createControlWindow()
     overlay = createOverlayWindow()
 
@@ -42,7 +46,7 @@ if (!app.requestSingleInstanceLock()) {
       }
     })
 
-    console.log('[main] windows created')
+    console.log('[main] windows created; dock visible:', app.dock?.isVisible?.() ?? 'n/a')
   })
 
   app.on('second-instance', () => {

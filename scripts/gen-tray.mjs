@@ -50,12 +50,12 @@ function drawIcon(size) {
     rgba[(y * size + x) * 4 + 3] = a // black with alpha
   }
 
-  const pad = Math.round(size * 0.1)
+  const pad = Math.round(size * 0.06)
   const left = pad
   const right = size - pad
   const top = pad
-  const bot = Math.round(size * 0.7)
-  const r = Math.round(size * 0.2)
+  const bot = Math.round(size * 0.66)
+  const r = Math.round(size * 0.22)
 
   const inBubble = (x, y) => {
     if (x < left || x > right || y < top || y > bot) return false
@@ -81,7 +81,7 @@ function drawIcon(size) {
   }
 
   // Knock out two caption "lines" (set alpha back to 0).
-  const lineH = Math.max(1, Math.round(size * 0.08))
+  const lineH = Math.max(2, Math.round(size * 0.11))
   const lx0 = left + Math.round(size * 0.16)
   const lx1 = right - Math.round(size * 0.16)
   const ly1 = top + Math.round((bot - top) * 0.34)
