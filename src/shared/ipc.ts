@@ -2,16 +2,8 @@
 // Channel names + payload types live here so both sides stay in sync.
 
 export interface Settings {
-  /** Target language to translate into, e.g. "English", "Spanish". */
+  /** Target output language (one of REALTIME_TRANSLATE_CODES). Source is auto-detected. */
   targetLang: string
-  /** Source language hint; "auto" lets the model detect it. */
-  sourceLang: string
-  /** Realtime transcription model. */
-  transcribeModel: string
-  /** Chat model used for translation. */
-  translateModel: string
-  /** Server-VAD silence (ms) before a sentence is finalized. Lower = snappier. */
-  vadSilenceMs: number
   /** Mix the microphone into the captured audio. */
   micEnabled: boolean
   /** Overlay translation font size in px. */
@@ -28,10 +20,6 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   targetLang: 'English',
-  sourceLang: 'auto',
-  transcribeModel: 'gpt-4o-transcribe',
-  translateModel: 'gpt-4o-mini',
-  vadSilenceMs: 300,
   micEnabled: false,
   fontSize: 30,
   opacity: 0.55,
@@ -41,9 +29,8 @@ export const DEFAULT_SETTINGS: Settings = {
 }
 
 /**
- * Target languages supported by gpt-realtime-translate (its 13 output
- * languages), mapped to ISO codes. A target in this map uses the low-latency
- * realtime translate engine; anything else falls back to transcribe+translate.
+ * The 13 output languages supported by gpt-realtime-translate, mapped to ISO
+ * codes. The target language picker is limited to these. Source is auto-detected.
  */
 export const REALTIME_TRANSLATE_CODES: Record<string, string> = {
   English: 'en',

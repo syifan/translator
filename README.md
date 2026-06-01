@@ -1,9 +1,9 @@
 # Live Translator
 
 A macOS desktop app that listens to your **system audio** (and, optionally, your
-microphone), transcribes it live with OpenAI's Realtime API, translates it into a
-language you choose, and shows **both the original and the translation as a
-floating subtitle overlay** on top of everything — including fullscreen video.
+microphone), and uses OpenAI's **gpt-realtime-translate** model to show **both the
+original transcript and a live translation as a floating subtitle overlay** on top
+of everything — including fullscreen video.
 
 You bring your own OpenAI API key; it's stored encrypted on your machine and only
 ever used from the app's main process.
@@ -16,24 +16,26 @@ control window (settings + audio capture)        overlay window (transparent, cl
         │  → AudioWorklet → 24kHz mono PCM16                 │
         ▼  (IPC: audio frames)                               │ (IPC: subtitles)
                        main process
-   Realtime WS transcription  ─▶  Chat Completions translation
+   gpt-realtime-translate  (one WebSocket session)
+   streams source transcript + translated transcript, pace-matched
 ```
 
-- **Transcription:** OpenAI Realtime API (GA) transcription session (default
-  `gpt-4o-transcribe`, automatic server-VAD segmentation), over a WebSocket from
-  the main process.
-- **Translation:** streamed Chat Completions (default `gpt-4o-mini`).
-- Both model fields are **editable** — type any model your key can access (e.g.
-  `gpt-5.4-mini`); the dropdowns are just suggestions, so newer models work
-  without an app update.
-- **System audio:** captured via Electron's loopback support (Apple's
-  ScreenCaptureKit / CoreAudio Tap) — no virtual audio driver needed.
+- **Engine:** a single `gpt-realtime-translate` Realtime session
+  (`wss://api.openai.com/v1/realtime/translations`) that streams the source
+  transcript (`session.input_transcript.delta`) and the translation
+  (`session.output_transcript.delta`) continuously as you speak — no per-sentence
+  round trips. The translated audio it also produces is ignored; we use only text.
+- **Languages:** source is auto-detected (70+ languages); the target must be one of
+  the model's 13 output languages (English, Spanish, Portuguese, French, German,
+  Italian, Japanese, Korean, Chinese, Russian, Hindi, Indonesian, Vietnamese).
+- **System audio:** captured via Electron's CoreAudio Tap loopback — no virtual
+  audio driver needed.
 
 ## Requirements
 
 - macOS 13+ (developed on macOS 26, Apple Silicon)
 - Node.js 20+
-- An OpenAI API key with access to the realtime transcription models
+- An OpenAI API key with access to `gpt-realtime-translate`
 
 ## Develop
 
@@ -70,9 +72,9 @@ first time (or clear the quarantine flag).
 
 ## Configuration
 
-All settings (languages, models, mic, overlay font/opacity) are in the control
-window and persist to `settings.json` in the app's user-data directory. The API
-key is stored separately, encrypted via the OS keychain (`safeStorage`).
+All settings (target language, mic, overlay font/opacity/lines/hold) are in the
+control window and persist to `settings.json` in the app's user-data directory.
+The API key is stored separately, encrypted via the OS keychain (`safeStorage`).
 
 ## Project layout
 

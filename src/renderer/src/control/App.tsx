@@ -1,26 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { REALTIME_TRANSLATE_CODES, type SessionStatus, type Settings } from '@shared/ipc'
 import { isCapturing, startCapture, stopCapture } from './capture'
 
-const LANGUAGES = [
-  'English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese',
-  'Chinese (Simplified)', 'Chinese (Traditional)', 'Japanese', 'Korean',
-  'Russian', 'Arabic', 'Hindi', 'Dutch', 'Turkish', 'Vietnamese', 'Thai',
-  'Polish', 'Ukrainian', 'Indonesian', 'Swedish', 'Greek', 'Hebrew',
-]
-
-// Suggestions only — the fields accept any model name your key can access.
-// gpt-4o-transcribe works with automatic (server-VAD) segmentation, which is
-// what the pipeline uses. gpt-realtime-whisper needs manual buffer commits, so
-// it's intentionally not a default/suggestion yet.
-const TRANSCRIBE_MODELS = ['gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'whisper-1']
-const TRANSLATE_MODELS = [
-  'gpt-4o-mini',
-  'gpt-5.4-mini',
-  'gpt-5.4-nano',
-  'gpt-5.5',
-  'gpt-5-chat-latest',
-]
+// Target languages = the output languages gpt-realtime-translate supports.
+const LANGUAGES = Object.keys(REALTIME_TRANSLATE_CODES)
 
 const STATUS_META: Record<SessionStatus['state'], { label: string; color: string }> = {
   idle: { label: 'Idle', color: '#7b8499' },
@@ -109,8 +92,6 @@ export function App() {
     return <div style={S.loading}>Loading…</div>
   }
 
-  const usingRealtime = Boolean(REALTIME_TRANSLATE_CODES[settings.targetLang])
-
   return (
     <div style={S.page}>
       <header style={S.header}>
@@ -151,7 +132,7 @@ export function App() {
         <p style={S.hint}>Used only on your machine to call OpenAI for transcription &amp; translation.</p>
       </Section>
 
-      <Section title="Languages">
+      <Section title="Language">
         <Field label="Translate into">
           <select style={S.select} value={settings.targetLang} disabled={active} onChange={(e) => update({ targetLang: e.target.value })}>
             {LANGUAGES.map((l) => (
@@ -160,18 +141,8 @@ export function App() {
           </select>
         </Field>
         <p style={S.hint}>
-          {REALTIME_TRANSLATE_CODES[settings.targetLang]
-            ? '⚡ Real-time engine (gpt-realtime-translate) — lowest latency.'
-            : 'Standard engine (transcribe + translate) — this target isn’t supported by the real-time model.'}
+          ⚡ Powered by gpt-realtime-translate. Source language is auto-detected (70+ languages).
         </p>
-        <Field label="Spoken language">
-          <select style={S.select} value={settings.sourceLang} onChange={(e) => update({ sourceLang: e.target.value })}>
-            <option value="auto">Auto-detect</option>
-            {LANGUAGES.map((l) => (
-              <option key={l} value={l}>{l}</option>
-            ))}
-          </select>
-        </Field>
       </Section>
 
       <Section title="Audio">
@@ -182,14 +153,6 @@ export function App() {
           disabled={active}
           onChange={(v) => update({ micEnabled: v })}
         />
-        <Field label={`Sentence pause — ${settings.vadSilenceMs}ms`}>
-          <input
-            style={S.slider} type="range" min={100} max={800} step={50}
-            value={settings.vadSilenceMs}
-            onChange={(e) => update({ vadSilenceMs: Number(e.target.value) })}
-          />
-        </Field>
-        <p style={S.hint}>Shorter pause = sentences finalize &amp; translate sooner (but may split mid-thought).</p>
       </Section>
 
       <Section title="Overlay">
@@ -226,39 +189,6 @@ export function App() {
           checked={settings.showOriginal}
           onChange={(v) => update({ showOriginal: v })}
         />
-      </Section>
-
-      <Section title="Models">
-        {usingRealtime ? (
-          <p style={S.hint}>
-            ⚡ <b>{settings.targetLang}</b> uses the real-time engine — it already runs the newest
-            models (<code>gpt-realtime-whisper</code> + <code>gpt-realtime-translate</code>). The
-            models below only apply to the Standard fallback engine.
-          </p>
-        ) : null}
-        <Field label="Transcription (speech-to-text)">
-          <Combo
-            listId="transcribe-models"
-            value={settings.transcribeModel}
-            options={TRANSCRIBE_MODELS}
-            disabled={active || usingRealtime}
-            onChange={(v) => update({ transcribeModel: v })}
-          />
-        </Field>
-        <Field label="Translation (chat model)">
-          <Combo
-            listId="translate-models"
-            value={settings.translateModel}
-            options={TRANSLATE_MODELS}
-            disabled={active || usingRealtime}
-            onChange={(v) => update({ translateModel: v })}
-          />
-        </Field>
-        <p style={S.hint}>
-          {usingRealtime
-            ? 'gpt-4o-transcribe is still OpenAI’s current non-realtime STT family — there is no “gpt-5-transcribe.”'
-            : 'Type any model your API key can access — the list is just suggestions.'}
-        </p>
       </Section>
 
       <div style={S.footer}>
@@ -318,33 +248,6 @@ function Toggle(props: {
         style={S.checkbox}
       />
     </label>
-  )
-}
-
-function Combo(props: {
-  listId: string
-  value: string
-  options: string[]
-  disabled?: boolean
-  onChange: (v: string) => void
-}) {
-  return (
-    <>
-      <input
-        style={S.select}
-        list={props.listId}
-        value={props.value}
-        disabled={props.disabled}
-        spellCheck={false}
-        autoComplete="off"
-        onChange={(e) => props.onChange(e.target.value)}
-      />
-      <datalist id={props.listId}>
-        {props.options.map((o) => (
-          <option key={o} value={o} />
-        ))}
-      </datalist>
-    </>
   )
 }
 
