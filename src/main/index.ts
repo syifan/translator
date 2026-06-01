@@ -10,7 +10,12 @@ import { appState } from './state'
 // IMPORTANT: must run before `app` is ready. It appends the Chromium feature
 // switches that enable macOS system-audio loopback capture and registers the
 // `enable-loopback-audio` / `disable-loopback-audio` IPC handlers.
-initMain()
+//
+// forceCoreAudioTap: use Apple's CoreAudio Tap API (Electron 39+ default) rather
+// than the ScreenCaptureKit override. Electron 42 ships NSAudioCaptureUsageDescription
+// (CoreAudio Tap) but NOT NSScreenCaptureUsageDescription, so the SCK path returns
+// silent audio. CoreAudio Tap matches the binary's declared permission.
+initMain({ forceCoreAudioTap: true })
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
