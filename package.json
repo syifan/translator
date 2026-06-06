@@ -12,8 +12,11 @@
     "preview": "electron-vite preview",
     "gen:icons": "node scripts/gen-tray.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "sign:setup": "bash scripts/setup-signing.sh",
     "package:dir": "npm run build && electron-builder --mac --dir",
-    "dist": "npm run build && electron-builder --mac"
+    "package:signed": "npm run build && CSC_NAME=\"Live Translator Dev\" electron-builder --mac --dir",
+    "dist": "npm run build && electron-builder --mac",
+    "dist:signed": "npm run build && CSC_NAME=\"Live Translator Dev\" electron-builder --mac"
   },
   "dependencies": {
     "electron-audio-loopback": "^1.0.6",

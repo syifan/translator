@@ -63,12 +63,31 @@ Play any audio/video and the overlay appears at the bottom of the screen.
 ## Build a macOS app
 
 ```bash
-npm run package:dir   # unpacked .app in dist/  (fast, for local testing)
+npm run package:dir   # unpacked .app in dist/  (fast, ad-hoc signed)
 npm run dist          # .dmg in dist/
 ```
 
-The build is unsigned. To run an unsigned build, right-click the app → Open the
-first time (or clear the quarantine flag).
+These are ad-hoc signed. To run, right-click the app → Open the first time (or
+clear the quarantine flag).
+
+### Stable local signing (stop re-granting the recording permission)
+
+macOS ties the **Screen & System Audio Recording** grant to the app's code
+signature. Ad-hoc builds get a *new* signature each time, so the grant resets and
+you're re-prompted on every rebuild. Fix it once with a self-signed identity:
+
+```bash
+npm run sign:setup     # one-time: creates a "Live Translator Dev" cert in your
+                       # login keychain (prompts for your password / Touch ID)
+npm run package:signed # build signed with that stable identity (.app)
+npm run dist:signed    # …or a signed .dmg
+```
+
+On the first signed build, if macOS asks to let `codesign` use the key, click
+**Always Allow**. After that, rebuilds keep the same signature and your recording
+permission **persists** — no more re-granting. (Alternatively, create the cert via
+Keychain Access → Certificate Assistant → Create a Certificate → *Code Signing*,
+named `Live Translator Dev`.)
 
 ## Configuration
 
