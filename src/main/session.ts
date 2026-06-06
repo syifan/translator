@@ -9,6 +9,7 @@ import {
 } from '@shared/ipc'
 import { store } from './store'
 import { getKey } from './secrets'
+import { applyOverlayFloat } from './windows'
 import { RealtimeTranslateClient } from './openai/realtime-translate'
 
 interface Windows {
@@ -160,7 +161,11 @@ export class SessionManager {
   }
 
   private showOverlay(): void {
-    if (!this.windows.overlay.isDestroyed()) this.windows.overlay.showInactive()
+    if (this.windows.overlay.isDestroyed()) return
+    this.windows.overlay.showInactive()
+    // Re-assert float-over-fullscreen each time we show (covers the case where a
+    // video went fullscreen after the window was created).
+    applyOverlayFloat(this.windows.overlay)
   }
 
   private hideOverlay(): void {

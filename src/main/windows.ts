@@ -54,6 +54,7 @@ export function createOverlayWindow(): BrowserWindow {
     transparent: true,
     backgroundColor: '#00000000',
     hasShadow: false,
+    alwaysOnTop: true,
     resizable: false,
     movable: false,
     minimizable: false,
@@ -71,12 +72,25 @@ export function createOverlayWindow(): BrowserWindow {
     },
   })
 
-  // Float above everything, including other apps' fullscreen windows.
-  win.setAlwaysOnTop(true, 'screen-saver')
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   // Click-through: pointer events pass to the app underneath.
   win.setIgnoreMouseEvents(true, { forward: true })
 
+  // Apply the float-over-fullscreen behavior once the window is ready (applying
+  // it at creation races and often fails to stick on macOS).
+  win.once('ready-to-show', () => applyOverlayFloat(win))
+
   loadPage(win, 'overlay')
   return win
+}
+
+/**
+ * Make the overlay float above everything — including OTHER apps' native
+ * fullscreen Spaces. Order matters: set the all-Spaces collection behavior
+ * first, then the window level. Safe to call repeatedly (e.g. each time the
+ * overlay is shown) to re-assert over a fullscreen app.
+ */
+export function applyOverlayFloat(win: BrowserWindow): void {
+  if (win.isDestroyed()) return
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  win.setAlwaysOnTop(true, 'screen-saver')
 }
