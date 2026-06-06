@@ -31,6 +31,8 @@ export class RealtimeTranslateClient {
   private framesSent = 0
   private framesDropped = 0
   private peak = 0
+  private seenTypes = new Set<string>()
+  private gotSourceDelta = false
 
   constructor(private opts: RealtimeTranslateOptions) {}
 
@@ -123,25 +125,51 @@ export class RealtimeTranslateClient {
     } catch {
       return
     }
-    switch (msg.type) {
-      case 'session.input_transcript.delta':
-        if (msg.delta) this.opts.onSourceDelta(msg.delta)
-        break
-      case 'session.output_transcript.delta':
-        if (msg.delta) this.opts.onTranslationDelta(msg.delta)
-        break
-      case 'error':
-        console.error('[rt-translate] error event:', JSON.stringify(msg))
-        this.opts.onError(
-          `Translate error${msg.error?.code ? ` (${msg.error.code})` : ''}: ${msg.error?.message ?? 'unknown'}`,
-        )
-        break
-      default:
-        // Log session lifecycle events; skip high-frequency delta/audio events.
-        if (typeof msg.type === 'string' && !msg.type.endsWith('.delta') && !msg.type.includes('audio')) {
-          console.log('[rt-translate] <<', msg.type)
-        }
-        break
+    const t: string = typeof msg.type === 'string' ? msg.type : ''
+
+    // Diagnostic: log each distinct event type once so we can see exactly which
+    // event carries the source vs translated transcript.
+    if (t && !this.seenTypes.has(t)) {
+      this.seenTypes.add(t)
+      console.log('[rt-translate] event type:', t)
+    }
+
+    // Translated transcript.
+    if (t === 'session.output_transcript.delta') {
+      if (msg.delta) this.opts.onTranslationDelta(msg.delta)
+      return
+    }
+
+    // Source (original) transcript — accept the known + likely alternative names
+    // (the input-transcription sub-model may emit the standard realtime event).
+    if (
+      t === 'session.input_transcript.delta' ||
+      t === 'conversation.item.input_audio_transcription.delta' ||
+      t === 'input_audio_transcription.delta'
+    ) {
+      const text = msg.delta ?? msg.transcript ?? msg.text ?? ''
+      if (text) {
+        this.gotSourceDelta = true
+        this.opts.onSourceDelta(text)
+      }
+      return
+    }
+    // Fallback: some models emit only a completed event for the source.
+    if (
+      t === 'conversation.item.input_audio_transcription.completed' ||
+      t === 'session.input_transcript.completed' ||
+      t === 'session.input_transcript.done'
+    ) {
+      const text = msg.transcript ?? msg.text ?? ''
+      if (text && !this.gotSourceDelta) this.opts.onSourceDelta(text + ' ')
+      return
+    }
+
+    if (t === 'error') {
+      console.error('[rt-translate] error event:', JSON.stringify(msg))
+      this.opts.onError(
+        `Translate error${msg.error?.code ? ` (${msg.error.code})` : ''}: ${msg.error?.message ?? 'unknown'}`,
+      )
     }
   }
 
