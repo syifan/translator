@@ -45,12 +45,17 @@ openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
   -keyout "$TMP/key.pem" -out "$TMP/cert.pem" \
   -config "$TMP/req.cnf" -extensions v3_codesign
 
-# 2) Bundle into a password-less PKCS#12.
-openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
-  -name "$IDENTITY" -out "$TMP/identity.p12" -passout pass:
+# 2) Bundle into a PKCS#12. IMPORTANT: macOS `security import` cannot read the
+#    modern format OpenSSL 3.x produces, and an empty password fails its MAC
+#    check — so use legacy algorithms + a throwaway password.
+P12PW="lt-import"
+openssl pkcs12 -export -legacy -macalg sha1 \
+  -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES \
+  -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
+  -name "$IDENTITY" -out "$TMP/identity.p12" -passout pass:"$P12PW"
 
 # 3) Import the key+cert into the login keychain, pre-authorizing codesign.
-security import "$TMP/identity.p12" -k "$KEYCHAIN" -P "" -T /usr/bin/codesign
+security import "$TMP/identity.p12" -k "$KEYCHAIN" -P "$P12PW" -T /usr/bin/codesign
 
 # 4) Trust it for code signing so electron-builder/codesign accept it.
 #    (User-domain trust; will prompt for your password.)
