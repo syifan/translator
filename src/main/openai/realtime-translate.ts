@@ -79,7 +79,10 @@ export class RealtimeTranslateClient {
         audio: {
           input: {
             transcription: { model: 'gpt-realtime-whisper' },
-            noise_reduction: { type: 'near_field' },
+            // No noise reduction: this is clean captured media audio, not a
+            // close-talking mic. "near_field" filtering suppressed quieter /
+            // secondary speakers in a conversation, so they were never heard.
+            noise_reduction: null,
           },
           output: { language: this.opts.targetCode },
         },
