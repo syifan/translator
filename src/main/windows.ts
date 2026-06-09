@@ -50,6 +50,9 @@ export function createOverlayWindow(): BrowserWindow {
     height,
     x: Math.round(workArea.x + (workArea.width - width) / 2),
     y: Math.round(workArea.y + workArea.height - height - 48),
+    // 'panel' (NSPanel) is what lets the window float over OTHER apps' native
+    // fullscreen Spaces — a normal window stays behind them on macOS.
+    type: 'panel',
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
