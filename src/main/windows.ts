@@ -94,6 +94,12 @@ export function createOverlayWindow(): BrowserWindow {
  */
 export function applyOverlayFloat(win: BrowserWindow): void {
   if (win.isDestroyed()) return
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  // skipTransformProcessType: without it, visibleOnFullScreen flips the app to
+  // the "accessory" activation policy, which hides the Dock icon. The overlay
+  // is an NSPanel, so it floats over fullscreen without that transform.
+  win.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true,
+  })
   win.setAlwaysOnTop(true, 'screen-saver')
 }
