@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import { IPC, type SessionStatus, type Settings } from '@shared/ipc'
+import { IPC, type DisplayInfo, type SessionStatus, type Settings } from '@shared/ipc'
 
 // Settings / session control surface.
 contextBridge.exposeInMainWorld('api', {
@@ -15,6 +15,12 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (_e: IpcRendererEvent, s: SessionStatus) => cb(s)
     ipcRenderer.on(IPC.statusChanged, listener)
     return () => ipcRenderer.removeListener(IPC.statusChanged, listener)
+  },
+  getDisplays: (): Promise<DisplayInfo[]> => ipcRenderer.invoke(IPC.getDisplays),
+  onDisplaysChanged: (cb: (d: DisplayInfo[]) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, d: DisplayInfo[]) => cb(d)
+    ipcRenderer.on(IPC.displaysChanged, listener)
+    return () => ipcRenderer.removeListener(IPC.displaysChanged, listener)
   },
 })
 

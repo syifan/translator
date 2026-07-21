@@ -1,5 +1,6 @@
-import { BrowserWindow, screen } from 'electron'
+import { BrowserWindow, screen, type Display } from 'electron'
 import { join } from 'node:path'
+import { store } from './store'
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 
@@ -40,16 +41,40 @@ export function createControlWindow(): BrowserWindow {
   return win
 }
 
-export function createOverlayWindow(): BrowserWindow {
-  const { workArea } = screen.getPrimaryDisplay()
+/** Resolve the display the overlay should sit on; falls back to primary. */
+function overlayDisplay(displayId: number | null): Display {
+  if (displayId != null) {
+    const match = screen.getAllDisplays().find((d) => d.id === displayId)
+    if (match) return match
+  }
+  return screen.getPrimaryDisplay()
+}
+
+function overlayBounds(displayId: number | null): Electron.Rectangle {
+  const { workArea } = overlayDisplay(displayId)
   const width = Math.min(1100, workArea.width - 80)
   const height = 320
-
-  const win = new BrowserWindow({
+  return {
     width,
     height,
     x: Math.round(workArea.x + (workArea.width - width) / 2),
     y: Math.round(workArea.y + workArea.height - height - 48),
+  }
+}
+
+/**
+ * Move the overlay to the bottom-center of the configured display. Safe to
+ * call anytime (e.g. on settings change or display plug/unplug); falls back
+ * to the primary display when the saved one is gone.
+ */
+export function positionOverlay(win: BrowserWindow, displayId: number | null): void {
+  if (win.isDestroyed()) return
+  win.setBounds(overlayBounds(displayId))
+}
+
+export function createOverlayWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    ...overlayBounds(store.get().displayId),
     // 'panel' (NSPanel) is what lets the window float over OTHER apps' native
     // fullscreen Spaces — a normal window stays behind them on macOS.
     type: 'panel',

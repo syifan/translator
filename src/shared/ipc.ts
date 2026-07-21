@@ -16,6 +16,14 @@ export interface Settings {
   maxLines: number
   /** Show the original (untranslated) line above the translation. */
   showOriginal: boolean
+  /** Display the overlay shows on; null = primary display. */
+  displayId: number | null
+}
+
+export interface DisplayInfo {
+  id: number
+  label: string
+  primary: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -26,6 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   holdSeconds: 6,
   maxLines: 3,
   showOriginal: true,
+  displayId: null,
 }
 
 /**
@@ -87,9 +96,11 @@ export const IPC = {
   clearKey: 'key:clear',
   startSession: 'session:start',
   stopSession: 'session:stop',
+  getDisplays: 'displays:get',
 
   // main -> control window (send)
   statusChanged: 'session:status',
+  displaysChanged: 'displays:changed',
   captureCommand: 'capture:command',
 
   // control window -> main (send)

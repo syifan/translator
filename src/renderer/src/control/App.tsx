@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { REALTIME_TRANSLATE_CODES, type SessionStatus, type Settings } from '@shared/ipc'
+import { REALTIME_TRANSLATE_CODES, type DisplayInfo, type SessionStatus, type Settings } from '@shared/ipc'
 import { isCapturing, startCapture, stopCapture } from './capture'
 
 // Target languages = the output languages gpt-realtime-translate supports.
@@ -19,10 +19,13 @@ export function App() {
   const [keySaving, setKeySaving] = useState(false)
   const [status, setStatus] = useState<SessionStatus>({ state: 'idle' })
   const [busy, setBusy] = useState(false)
+  const [displays, setDisplays] = useState<DisplayInfo[]>([])
 
   useEffect(() => {
     void window.api.getSettings().then(setSettings)
     void window.api.hasKey().then(setHasKey)
+    void window.api.getDisplays().then(setDisplays)
+    const offDisplays = window.api.onDisplaysChanged(setDisplays)
     const offStatus = window.api.onStatus((s) => {
       setStatus(s)
       if ((s.state === 'idle' || s.state === 'error') && isCapturing()) void stopCapture()
@@ -33,6 +36,7 @@ export function App() {
     return () => {
       offStatus()
       offStop()
+      offDisplays()
     }
   }, [])
 
@@ -156,6 +160,21 @@ export function App() {
       </Section>
 
       <Section title="Overlay">
+        {displays.length > 1 ? (
+          <Field label="Show subtitles on">
+            <select
+              style={S.select}
+              value={settings.displayId ?? displays.find((d) => d.primary)?.id ?? ''}
+              onChange={(e) => update({ displayId: Number(e.target.value) })}
+            >
+              {displays.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.label}{d.primary ? ' — main' : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : null}
         <Field label={`Font size — ${settings.fontSize}px`}>
           <input
             style={S.slider} type="range" min={16} max={56} step={1}

@@ -1,4 +1,5 @@
 import type {
+  DisplayInfo,
   OverlayConfig,
   SessionStatus,
   Settings,
@@ -16,6 +17,8 @@ declare global {
       startSession(): Promise<void>
       stopSession(): Promise<void>
       onStatus(cb: (s: SessionStatus) => void): () => void
+      getDisplays(): Promise<DisplayInfo[]>
+      onDisplaysChanged(cb: (d: DisplayInfo[]) => void): () => void
     }
     capture: {
       enableLoopback(): Promise<void>
