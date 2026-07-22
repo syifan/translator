@@ -7,6 +7,7 @@ const DEFAULT_CONFIG: OverlayConfig = {
   holdSeconds: 6,
   maxLines: 3,
   showOriginal: true,
+  showTranslation: true,
 }
 
 export function Overlay() {
@@ -73,14 +74,23 @@ export function Overlay() {
     <div style={container}>
       {units.map((u, i) => {
         const newest = i === units.length - 1
-        const transSize = Math.round(cfg.fontSize * (newest ? 1 : 0.8))
-        const origSize = Math.round(transSize * 0.68)
+        const mainSize = Math.round(cfg.fontSize * (newest ? 1 : 0.8))
+        const origSize = Math.round(mainSize * 0.68)
+        // Transcribe-only: the original transcript IS the caption, so it takes
+        // the main-line styling (and stays visible even if showOriginal is off).
+        const originalIsMain = !cfg.showTranslation
+        const mainStyle: React.CSSProperties = {
+          background: bg, color: '#ffffff', fontSize: mainSize, fontWeight: 700, lineHeight: 1.3,
+          padding: '5px 16px', borderRadius: 12, textAlign: 'center', textShadow: '0 2px 5px rgba(0,0,0,0.95)',
+          backdropFilter: 'blur(2px)', opacity: u.isFinal ? 1 : 0.95,
+        }
         return (
           <div
             key={u.itemId}
             style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, maxWidth: '94%', opacity: newest ? 1 : 0.7 }}
           >
-            {cfg.showOriginal && u.original ? (
+            {originalIsMain && u.original ? <div style={mainStyle}>{u.original}</div> : null}
+            {!originalIsMain && cfg.showOriginal && u.original ? (
               <div
                 style={{
                   background: bg, color: '#d6dae3', fontSize: origSize, fontWeight: 500, lineHeight: 1.25,
@@ -91,17 +101,7 @@ export function Overlay() {
                 {u.original}
               </div>
             ) : null}
-            {u.translation ? (
-              <div
-                style={{
-                  background: bg, color: '#ffffff', fontSize: transSize, fontWeight: 700, lineHeight: 1.3,
-                  padding: '5px 16px', borderRadius: 12, textAlign: 'center', textShadow: '0 2px 5px rgba(0,0,0,0.95)',
-                  backdropFilter: 'blur(2px)', opacity: u.isFinal ? 1 : 0.95,
-                }}
-              >
-                {u.translation}
-              </div>
-            ) : null}
+            {cfg.showTranslation && u.translation ? <div style={mainStyle}>{u.translation}</div> : null}
           </div>
         )
       })}

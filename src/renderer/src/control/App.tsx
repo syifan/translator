@@ -136,16 +136,33 @@ export function App() {
         <p style={S.hint}>Used only on your machine to call OpenAI for transcription &amp; translation.</p>
       </Section>
 
-      <Section title="Language">
-        <Field label="Translate into">
-          <select style={S.select} value={settings.targetLang} disabled={active} onChange={(e) => update({ targetLang: e.target.value })}>
-            {LANGUAGES.map((l) => (
-              <option key={l} value={l}>{l}</option>
-            ))}
-          </select>
-        </Field>
+      <Section title="Subtitles">
+        <Toggle
+          label="Transcription (original)"
+          hint="Show what was said, as spoken"
+          checked={settings.showOriginal}
+          onChange={(v) => update({ showOriginal: v })}
+        />
+        <Toggle
+          label="Translation"
+          hint="Off = transcribe-only session (cheaper, no translation model)"
+          checked={settings.showTranslation}
+          disabled={active}
+          onChange={(v) => update({ showTranslation: v })}
+        />
+        {settings.showTranslation ? (
+          <Field label="Translate into">
+            <select style={S.select} value={settings.targetLang} disabled={active} onChange={(e) => update({ targetLang: e.target.value })}>
+              {LANGUAGES.map((l) => (
+                <option key={l} value={l}>{l}</option>
+              ))}
+            </select>
+          </Field>
+        ) : null}
         <p style={S.hint}>
-          ⚡ Powered by gpt-realtime-translate. Source language is auto-detected (70+ languages).
+          {settings.showTranslation
+            ? '⚡ Powered by gpt-realtime-translate. Source language is auto-detected (70+ languages).'
+            : '⚡ Powered by gpt-4o-transcribe. Language is auto-detected.'}
         </p>
       </Section>
 
@@ -203,11 +220,6 @@ export function App() {
             onChange={(e) => update({ maxLines: Number(e.target.value) })}
           />
         </Field>
-        <Toggle
-          label="Show original text"
-          checked={settings.showOriginal}
-          onChange={(v) => update({ showOriginal: v })}
-        />
       </Section>
 
       <div style={S.footer}>
@@ -215,10 +227,13 @@ export function App() {
           <div style={S.error}>{status.message}</div>
         ) : null}
         {!hasKey ? <div style={S.warn}>Add your API key to start.</div> : null}
+        {!settings.showOriginal && !settings.showTranslation ? (
+          <div style={S.warn}>Enable at least one subtitle line to start.</div>
+        ) : null}
         <button
           style={active ? S.stopBtn : S.startBtn}
           onClick={active ? stop : start}
-          disabled={busy || (!active && !hasKey)}
+          disabled={busy || (!active && (!hasKey || (!settings.showOriginal && !settings.showTranslation)))}
         >
           {active ? 'Stop' : busy ? 'Starting…' : 'Start translating'}
         </button>

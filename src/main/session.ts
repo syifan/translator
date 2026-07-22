@@ -11,6 +11,10 @@ import { store } from './store'
 import { getKey } from './secrets'
 import { applyOverlayFloat, positionOverlay } from './windows'
 import { RealtimeTranslateClient } from './openai/realtime-translate'
+import { TranscriptionClient } from './openai/transcription'
+
+/** Transcribe-only engine model (translation off). */
+const TRANSCRIBE_MODEL = 'gpt-4o-transcribe'
 
 interface Windows {
   control: BrowserWindow
@@ -23,6 +27,7 @@ interface Windows {
  */
 export class SessionManager {
   private rt: RealtimeTranslateClient | null = null
+  private tx: TranscriptionClient | null = null
   private settings: Settings
   private status: SessionStatus = { state: 'idle' }
   // Rolling transcript buffers for the live caption.
@@ -55,6 +60,36 @@ export class SessionManager {
     }
 
     this.settings = store.get()
+
+    if (!this.settings.showTranslation && !this.settings.showOriginal) {
+      this.setStatus({
+        state: 'error',
+        message: 'Both subtitle lines are hidden. Enable transcription and/or translation first.',
+      })
+      return
+    }
+
+    // Transcribe-only: no translation model in the loop (cheaper).
+    if (!this.settings.showTranslation) {
+      this.setStatus({ state: 'starting' })
+      this.pushOverlayConfig()
+      console.log('[session] transcribe-only ->', TRANSCRIBE_MODEL)
+      this.tx = new TranscriptionClient({
+        apiKey: key,
+        model: TRANSCRIBE_MODEL,
+        onOpen: () => this.setStatus({ state: 'running' }),
+        onDelta: (id, text) => this.emitUnit(id, text, '', false),
+        onCompleted: (id, text) => this.emitUnit(id, text, '', true),
+        onError: (message) => this.setStatus({ state: 'error', message }),
+        onClose: () => {
+          this.hideOverlay()
+          if (this.status.state !== 'error') this.setStatus({ state: 'idle' })
+        },
+      })
+      this.tx.connect()
+      return
+    }
+
     const targetCode = REALTIME_TRANSLATE_CODES[this.settings.targetLang]
     if (!targetCode) {
       this.setStatus({
@@ -96,6 +131,8 @@ export class SessionManager {
   stop(): void {
     this.rt?.close()
     this.rt = null
+    this.tx?.close()
+    this.tx = null
     this.rtSrc = ''
     this.rtTrans = ''
     this.hideOverlay()
@@ -106,12 +143,15 @@ export class SessionManager {
 
   pushAudio(buf: ArrayBuffer): void {
     this.rt?.sendAudio(buf)
+    this.tx?.sendAudio(buf)
   }
 
   onCaptureError(message: string): void {
     this.setStatus({ state: 'error', message })
     this.rt?.close()
     this.rt = null
+    this.tx?.close()
+    this.tx = null
     this.hideOverlay()
   }
 
@@ -157,6 +197,7 @@ export class SessionManager {
       holdSeconds: this.settings.holdSeconds,
       maxLines: this.settings.maxLines,
       showOriginal: this.settings.showOriginal,
+      showTranslation: this.settings.showTranslation,
     } satisfies OverlayConfig)
   }
 

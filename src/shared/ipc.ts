@@ -14,8 +14,10 @@ export interface Settings {
   holdSeconds: number
   /** Number of recent sentences kept on the overlay at once. */
   maxLines: number
-  /** Show the original (untranslated) line above the translation. */
+  /** Show the original (untranslated) transcription line. */
   showOriginal: boolean
+  /** Show the translated line. Off = transcribe-only session (no translation model). */
+  showTranslation: boolean
   /** Display the overlay shows on; null = primary display. */
   displayId: number | null
 }
@@ -34,6 +36,7 @@ export const DEFAULT_SETTINGS: Settings = {
   holdSeconds: 6,
   maxLines: 3,
   showOriginal: true,
+  showTranslation: true,
   displayId: null,
 }
 
@@ -80,6 +83,7 @@ export interface OverlayConfig {
   holdSeconds: number
   maxLines: number
   showOriginal: boolean
+  showTranslation: boolean
 }
 
 export interface CaptureCommand {
