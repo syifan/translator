@@ -4,6 +4,10 @@ import type {
   SessionStatus,
   Settings,
   SubtitlePayload,
+  TranscriptEntryPayload,
+  TranscriptFileInfo,
+  TranscriptPartialPayload,
+  TranscriptSavedPayload,
 } from '@shared/ipc'
 
 declare global {
@@ -19,6 +23,12 @@ declare global {
       onStatus(cb: (s: SessionStatus) => void): () => void
       getDisplays(): Promise<DisplayInfo[]>
       onDisplaysChanged(cb: (d: DisplayInfo[]) => void): () => void
+      openTranscriptsFolder(): Promise<void>
+      listTranscripts(): Promise<TranscriptFileInfo[]>
+      readTranscript(fileName: string): Promise<string>
+      onTranscriptSaved(cb: (p: TranscriptSavedPayload) => void): () => void
+      onTranscriptEntry(cb: (p: TranscriptEntryPayload) => void): () => void
+      onTranscriptPartial(cb: (p: TranscriptPartialPayload) => void): () => void
     }
     capture: {
       enableLoopback(): Promise<void>

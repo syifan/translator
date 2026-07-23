@@ -1,5 +1,14 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import { IPC, type DisplayInfo, type SessionStatus, type Settings } from '@shared/ipc'
+import {
+  IPC,
+  type DisplayInfo,
+  type SessionStatus,
+  type Settings,
+  type TranscriptEntryPayload,
+  type TranscriptFileInfo,
+  type TranscriptPartialPayload,
+  type TranscriptSavedPayload,
+} from '@shared/ipc'
 
 // Settings / session control surface.
 contextBridge.exposeInMainWorld('api', {
@@ -17,6 +26,25 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener(IPC.statusChanged, listener)
   },
   getDisplays: (): Promise<DisplayInfo[]> => ipcRenderer.invoke(IPC.getDisplays),
+  openTranscriptsFolder: (): Promise<void> => ipcRenderer.invoke(IPC.openTranscriptsFolder),
+  listTranscripts: (): Promise<TranscriptFileInfo[]> => ipcRenderer.invoke(IPC.listTranscripts),
+  readTranscript: (fileName: string): Promise<string> =>
+    ipcRenderer.invoke(IPC.readTranscript, fileName),
+  onTranscriptSaved: (cb: (p: TranscriptSavedPayload) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, p: TranscriptSavedPayload) => cb(p)
+    ipcRenderer.on(IPC.transcriptSaved, listener)
+    return () => ipcRenderer.removeListener(IPC.transcriptSaved, listener)
+  },
+  onTranscriptEntry: (cb: (p: TranscriptEntryPayload) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, p: TranscriptEntryPayload) => cb(p)
+    ipcRenderer.on(IPC.transcriptEntry, listener)
+    return () => ipcRenderer.removeListener(IPC.transcriptEntry, listener)
+  },
+  onTranscriptPartial: (cb: (p: TranscriptPartialPayload) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, p: TranscriptPartialPayload) => cb(p)
+    ipcRenderer.on(IPC.transcriptPartial, listener)
+    return () => ipcRenderer.removeListener(IPC.transcriptPartial, listener)
+  },
   onDisplaysChanged: (cb: (d: DisplayInfo[]) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, d: DisplayInfo[]) => cb(d)
     ipcRenderer.on(IPC.displaysChanged, listener)

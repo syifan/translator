@@ -1,9 +1,12 @@
-import { BrowserWindow, ipcMain, screen } from 'electron'
-import { IPC, type DisplayInfo, type Settings } from '@shared/ipc'
+import { BrowserWindow, ipcMain, screen, shell } from 'electron'
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
+import { basename, join } from 'node:path'
+import { IPC, type DisplayInfo, type Settings, type TranscriptFileInfo } from '@shared/ipc'
 import type { SessionManager } from './session'
 import { store } from './store'
 import * as secrets from './secrets'
 import { positionOverlay } from './windows'
+import { transcriptsDir } from './transcript-log'
 
 function listDisplays(): DisplayInfo[] {
   const primaryId = screen.getPrimaryDisplay().id
@@ -43,6 +46,39 @@ export function registerIpc(
   ipcMain.handle(IPC.hasKey, () => secrets.hasKey())
   ipcMain.handle(IPC.setKey, (_e, key: string) => secrets.setKey(key))
   ipcMain.handle(IPC.clearKey, () => secrets.clearKey())
+
+  ipcMain.handle(IPC.openTranscriptsFolder, async () => {
+    const dir = transcriptsDir()
+    await mkdir(dir, { recursive: true })
+    await shell.openPath(dir)
+  })
+
+  ipcMain.handle(IPC.listTranscripts, async (): Promise<TranscriptFileInfo[]> => {
+    const dir = transcriptsDir()
+    let names: string[]
+    try {
+      names = await readdir(dir)
+    } catch {
+      return []
+    }
+    const infos = await Promise.all(
+      names
+        .filter((n) => n.endsWith('.md'))
+        .map(async (n) => {
+          const s = await stat(join(dir, n))
+          return { fileName: n, mtimeMs: s.mtimeMs }
+        }),
+    )
+    return infos.sort((a, b) => b.mtimeMs - a.mtimeMs)
+  })
+
+  ipcMain.handle(IPC.readTranscript, async (_e, fileName: string): Promise<string> => {
+    // Only bare .md file names inside the transcripts dir are ever read.
+    if (basename(fileName) !== fileName || !fileName.endsWith('.md')) {
+      throw new Error('Invalid transcript file name')
+    }
+    return readFile(join(transcriptsDir(), fileName), 'utf8')
+  })
 
   ipcMain.handle(IPC.startSession, () => session.start())
   ipcMain.handle(IPC.stopSession, () => session.stop())

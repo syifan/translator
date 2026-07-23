@@ -6,12 +6,17 @@ import {
   type SessionStatus,
   type Settings,
   type SubtitlePayload,
+  type TranscriptEntryPayload,
+  type TranscriptPartialPayload,
+  type TranscriptSavedPayload,
 } from '@shared/ipc'
 import { store } from './store'
 import { getKey } from './secrets'
 import { applyOverlayFloat, positionOverlay } from './windows'
 import { RealtimeTranslateClient } from './openai/realtime-translate'
 import { TranscriptionClient } from './openai/transcription'
+import { TranscriptLog } from './transcript-log'
+import { basename } from 'node:path'
 
 /** Transcribe-only engine model (translation off). */
 const TRANSCRIBE_MODEL = 'gpt-4o-transcribe'
@@ -34,6 +39,8 @@ export class SessionManager {
   private rtSrc = ''
   private rtTrans = ''
   private rtLastDelta = 0
+  // Full-session transcript, saved to disk when the session ends.
+  private log: TranscriptLog | null = null
 
   constructor(private windows: Windows) {
     this.settings = store.get()
@@ -42,6 +49,11 @@ export class SessionManager {
   applySettings(next: Settings): void {
     this.settings = next
     this.pushOverlayConfig()
+    // Overlay visibility can be toggled live mid-session.
+    if (this.isActive()) {
+      if (this.subtitlesEnabled()) this.showOverlay()
+      else this.hideOverlay()
+    }
     const code = REALTIME_TRANSLATE_CODES[next.targetLang]
     if (this.rt && code) this.rt.setTarget(code)
   }
@@ -61,27 +73,37 @@ export class SessionManager {
 
     this.settings = store.get()
 
-    if (!this.settings.showTranslation && !this.settings.showOriginal) {
+    if (!this.settings.systemAudioEnabled && !this.settings.micEnabled) {
       this.setStatus({
         state: 'error',
-        message: 'Both subtitle lines are hidden. Enable transcription and/or translation first.',
+        message: 'Both audio inputs are off. Enable system audio and/or the microphone in Settings.',
       })
       return
     }
 
-    // Transcribe-only: no translation model in the loop (cheaper).
+    // Transcribe-only: no translation model in the loop (cheaper). Also the
+    // engine when both overlay lines are off (in-app transcript only).
     if (!this.settings.showTranslation) {
       this.setStatus({ state: 'starting' })
       this.pushOverlayConfig()
+      this.startLog()
       console.log('[session] transcribe-only ->', TRANSCRIBE_MODEL)
       this.tx = new TranscriptionClient({
         apiKey: key,
         model: TRANSCRIBE_MODEL,
         onOpen: () => this.setStatus({ state: 'running' }),
-        onDelta: (id, text) => this.emitUnit(id, text, '', false),
-        onCompleted: (id, text) => this.emitUnit(id, text, '', true),
+        onDelta: (id, text) => {
+          this.emitUnit(id, text, '', false)
+          this.sendPartial(text, '')
+        },
+        onCompleted: (id, text) => {
+          this.log?.add(text, '')
+          this.emitUnit(id, text, '', true)
+          this.sendPartial('', '')
+        },
         onError: (message) => this.setStatus({ state: 'error', message }),
         onClose: () => {
+          this.finishLog()
           this.hideOverlay()
           if (this.status.state !== 'error') this.setStatus({ state: 'idle' })
         },
@@ -101,6 +123,7 @@ export class SessionManager {
 
     this.setStatus({ state: 'starting' })
     this.pushOverlayConfig()
+    this.startLog()
     this.rtSrc = ''
     this.rtTrans = ''
 
@@ -113,14 +136,17 @@ export class SessionManager {
         this.rtTouch()
         this.rtSrc += d
         this.emitRtLive()
+        this.sendPartial(this.rtSrc, this.rtTrans)
       },
       onTranslationDelta: (d) => {
         this.rtTouch()
         this.rtTrans += d
         this.emitRtLive()
+        this.sendPartial(this.rtSrc, this.rtTrans)
       },
       onError: (message) => this.setStatus({ state: 'error', message }),
       onClose: () => {
+        this.finishLog()
         this.hideOverlay()
         if (this.status.state !== 'error') this.setStatus({ state: 'idle' })
       },
@@ -129,6 +155,7 @@ export class SessionManager {
   }
 
   stop(): void {
+    this.finishLog()
     this.rt?.close()
     this.rt = null
     this.tx?.close()
@@ -147,6 +174,7 @@ export class SessionManager {
   }
 
   onCaptureError(message: string): void {
+    this.finishLog()
     this.setStatus({ state: 'error', message })
     this.rt?.close()
     this.rt = null
@@ -161,10 +189,55 @@ export class SessionManager {
   private rtTouch(): void {
     const now = Date.now()
     if (now - this.rtLastDelta > 2500) {
+      // The pause marks the end of an utterance; log it before discarding.
+      this.log?.add(this.rtSrc, this.rtTrans)
       this.rtSrc = ''
       this.rtTrans = ''
     }
     this.rtLastDelta = now
+  }
+
+  /** Fresh per-session log that mirrors every finalized entry to the app. */
+  private startLog(): void {
+    this.log = new TranscriptLog((e) => {
+      this.send(this.windows.control, IPC.transcriptEntry, {
+        time: e.time.getTime(),
+        original: e.original,
+        translation: e.translation,
+      } satisfies TranscriptEntryPayload)
+    })
+  }
+
+  /** Mirror the in-progress (unfinalized) utterance to the app. */
+  private sendPartial(original: string, translation: string): void {
+    this.send(this.windows.control, IPC.transcriptPartial, {
+      original,
+      translation,
+    } satisfies TranscriptPartialPayload)
+  }
+
+  private subtitlesEnabled(): boolean {
+    return this.settings.showOriginal || this.settings.showTranslation
+  }
+
+  /** Flush pending text, save the transcript, and tell the control window. */
+  private finishLog(): void {
+    const log = this.log
+    this.log = null
+    if (!log) return
+    log.add(this.rtSrc, this.rtTrans)
+    this.sendPartial('', '')
+    void log
+      .save()
+      .then((path) => {
+        if (!path) return
+        console.log('[session] transcript saved ->', path)
+        this.send(this.windows.control, IPC.transcriptSaved, {
+          path,
+          fileName: basename(path),
+        } satisfies TranscriptSavedPayload)
+      })
+      .catch((err) => console.error('[session] transcript save failed:', err))
   }
 
   private emitRtLive(): void {
@@ -186,7 +259,9 @@ export class SessionManager {
     this.send(this.windows.control, IPC.statusChanged, status)
     // Mirror to the overlay for "Connecting…/Listening…" feedback + visibility.
     this.send(this.windows.overlay, IPC.overlayStatus, status)
-    if (status.state === 'starting' || status.state === 'running') this.showOverlay()
+    const wantOverlay =
+      (status.state === 'starting' || status.state === 'running') && this.subtitlesEnabled()
+    if (wantOverlay) this.showOverlay()
     else this.hideOverlay()
   }
 

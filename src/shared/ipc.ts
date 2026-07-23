@@ -4,6 +4,8 @@
 export interface Settings {
   /** Target output language (one of REALTIME_TRANSLATE_CODES). Source is auto-detected. */
   targetLang: string
+  /** Capture system (loopback) audio. */
+  systemAudioEnabled: boolean
   /** Mix the microphone into the captured audio. */
   micEnabled: boolean
   /** Overlay translation font size in px. */
@@ -30,6 +32,7 @@ export interface DisplayInfo {
 
 export const DEFAULT_SETTINGS: Settings = {
   targetLang: 'English',
+  systemAudioEnabled: true,
   micEnabled: false,
   fontSize: 30,
   opacity: 0.55,
@@ -90,6 +93,34 @@ export interface CaptureCommand {
   action: 'stop'
 }
 
+export interface TranscriptSavedPayload {
+  /** Absolute path of the transcript file that was just written. */
+  path: string
+  /** Basename shown in the UI ("2026-07-22 14-30-05.md"). */
+  fileName: string
+}
+
+/** One finalized utterance, streamed to the control window as it is logged. */
+export interface TranscriptEntryPayload {
+  /** Epoch ms when the utterance was finalized. */
+  time: number
+  original: string
+  translation: string
+}
+
+/** The in-progress (not yet finalized) utterance text. */
+export interface TranscriptPartialPayload {
+  original: string
+  translation: string
+}
+
+/** A saved transcript file, listed in the notes sidebar. */
+export interface TranscriptFileInfo {
+  fileName: string
+  /** Last-modified epoch ms (list is sorted newest first). */
+  mtimeMs: number
+}
+
 /** IPC channel names. Suffix convention: nothing special, just unique strings. */
 export const IPC = {
   // control window <-> main (invoke/handle)
@@ -101,11 +132,17 @@ export const IPC = {
   startSession: 'session:start',
   stopSession: 'session:stop',
   getDisplays: 'displays:get',
+  openTranscriptsFolder: 'transcripts:open-folder',
+  listTranscripts: 'transcripts:list',
+  readTranscript: 'transcripts:read',
 
   // main -> control window (send)
   statusChanged: 'session:status',
   displaysChanged: 'displays:changed',
   captureCommand: 'capture:command',
+  transcriptSaved: 'transcript:saved',
+  transcriptEntry: 'transcript:entry',
+  transcriptPartial: 'transcript:partial',
 
   // control window -> main (send)
   audioPcm: 'audio:pcm',

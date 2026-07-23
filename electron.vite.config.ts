@@ -1,9 +1,11 @@
 import { resolve } from 'node:path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
 const shared = resolve(__dirname, 'src/shared')
 const alias = { '@shared': shared }
+const rendererAlias = { ...alias, '@': resolve(__dirname, 'src/renderer/src') }
 
 export default defineConfig({
   main: {
@@ -29,9 +31,9 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
-    resolve: { alias },
+    resolve: { alias: rendererAlias },
     server: { fs: { allow: [resolve(__dirname)] } },
-    plugins: [react()],
+    plugins: [react(), tailwindcss()],
     build: {
       rollupOptions: {
         input: {

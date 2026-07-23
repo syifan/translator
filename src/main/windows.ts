@@ -18,13 +18,15 @@ function preloadPath(name: string): string {
 
 export function createControlWindow(): BrowserWindow {
   const win = new BrowserWindow({
-    width: 440,
-    height: 720,
-    minWidth: 380,
-    minHeight: 560,
+    width: 900,
+    height: 640,
+    minWidth: 720,
+    minHeight: 480,
     title: 'Live Translator',
     show: false,
-    backgroundColor: '#0b0f1a',
+    backgroundColor: '#16181d',
+    // Native macOS look: content extends under the title bar, traffic lights inset.
+    titleBarStyle: 'hiddenInset',
     webPreferences: {
       preload: preloadPath('control'),
       sandbox: false,

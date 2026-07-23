@@ -12,29 +12,37 @@ export function isCapturing(): boolean {
   return running
 }
 
-export async function startCapture(micEnabled: boolean): Promise<void> {
+export interface CaptureInputs {
+  system: boolean
+  mic: boolean
+}
+
+export async function startCapture({ system, mic }: CaptureInputs): Promise<void> {
   if (running) return
+  if (!system && !mic) throw new Error('Enable system audio and/or the microphone in Settings.')
   running = true
   try {
     // 1) System audio via loopback. Auto-granted by the main-process
     //    setDisplayMediaRequestHandler (no picker dialog).
-    await window.capture.enableLoopback()
-    let sysStream: MediaStream
-    try {
-      sysStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
-    } finally {
-      await window.capture.disableLoopback()
+    let sysStream: MediaStream | null = null
+    if (system) {
+      await window.capture.enableLoopback()
+      try {
+        sysStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+      } finally {
+        await window.capture.disableLoopback()
+      }
+      sysStream.getVideoTracks().forEach((t) => {
+        t.stop()
+        sysStream!.removeTrack(t)
+      })
+      if (sysStream.getAudioTracks().length === 0) {
+        throw new Error(
+          'No system audio captured. Grant "Screen & System Audio Recording" to this app in System Settings → Privacy & Security, then restart.',
+        )
+      }
+      streams.push(sysStream)
     }
-    sysStream.getVideoTracks().forEach((t) => {
-      t.stop()
-      sysStream.removeTrack(t)
-    })
-    if (sysStream.getAudioTracks().length === 0) {
-      throw new Error(
-        'No system audio captured. Grant "Screen & System Audio Recording" to this app in System Settings → Privacy & Security, then restart.',
-      )
-    }
-    streams.push(sysStream)
 
     // 2) Web Audio graph + the resampling worklet.
     audioCtx = new AudioContext()
@@ -54,12 +62,14 @@ export async function startCapture(micEnabled: boolean): Promise<void> {
     mixer.gain.value = 1
     nodes.push(mixer)
 
-    const sysSource = audioCtx.createMediaStreamSource(sysStream)
-    sysSource.connect(mixer)
-    nodes.push(sysSource)
+    if (sysStream) {
+      const sysSource = audioCtx.createMediaStreamSource(sysStream)
+      sysSource.connect(mixer)
+      nodes.push(sysSource)
+    }
 
     // 3) Optional microphone, mixed into the same stream.
-    if (micEnabled) {
+    if (mic) {
       const micStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true },
       })
