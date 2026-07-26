@@ -32,7 +32,7 @@ declare global {
       saveQuickStart(name: string): Promise<QuickStart[]>
       deleteQuickStart(name: string): Promise<QuickStart[]>
       onTranscriptSaved(cb: (p: TranscriptSavedPayload) => void): () => void
-      onTranscriptEntry(cb: (p: TranscriptEntryPayload) => void): () => void
+      onTranscriptReplace(cb: (p: TranscriptEntryPayload[]) => void): () => void
       onTranscriptPartial(cb: (p: TranscriptPartialPayload) => void): () => void
     }
     capture: {

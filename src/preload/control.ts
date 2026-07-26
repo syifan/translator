@@ -44,10 +44,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on(IPC.transcriptSaved, listener)
     return () => ipcRenderer.removeListener(IPC.transcriptSaved, listener)
   },
-  onTranscriptEntry: (cb: (p: TranscriptEntryPayload) => void): (() => void) => {
-    const listener = (_e: IpcRendererEvent, p: TranscriptEntryPayload) => cb(p)
-    ipcRenderer.on(IPC.transcriptEntry, listener)
-    return () => ipcRenderer.removeListener(IPC.transcriptEntry, listener)
+  onTranscriptReplace: (cb: (p: TranscriptEntryPayload[]) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, p: TranscriptEntryPayload[]) => cb(p)
+    ipcRenderer.on(IPC.transcriptReplace, listener)
+    return () => ipcRenderer.removeListener(IPC.transcriptReplace, listener)
   },
   onTranscriptPartial: (cb: (p: TranscriptPartialPayload) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, p: TranscriptPartialPayload) => cb(p)

@@ -45,6 +45,8 @@ interface NoteRow {
   time: string
   original: string
   translation: string
+  /** Realtime draft not yet upgraded by the high-accuracy pass. */
+  draft?: boolean
 }
 
 /** Parse the Markdown we write in transcript-log.ts back into rows. */
@@ -114,14 +116,14 @@ export function App() {
       if (isCapturing()) void stopCapture()
     })
     const offSaved = window.api.onTranscriptSaved(() => refreshNotes())
-    const offEntry = window.api.onTranscriptEntry((e) => setEntries((prev) => [...prev, e]))
+    const offReplace = window.api.onTranscriptReplace(setEntries)
     const offPartial = window.api.onTranscriptPartial(setPartial)
     return () => {
       offStatus()
       offStop()
       offDisplays()
       offSaved()
-      offEntry()
+      offReplace()
       offPartial()
     }
   }, [refreshNotes])
@@ -211,6 +213,7 @@ export function App() {
     time: clock(e.time),
     original: e.original,
     translation: e.translation,
+    draft: !e.refined,
   }))
 
   return (
@@ -347,7 +350,9 @@ export function App() {
                 <EmptyState
                   text={
                     active
-                      ? 'Listening — the transcript will appear here.'
+                      ? settings.liveNotes
+                        ? 'Listening — the transcript will appear here.'
+                        : 'Listening — the high-accuracy transcript appears every few minutes.'
                       : 'Press “Start listening” to begin a new session. Finished sessions appear in the Notes list.'
                   }
                 />
@@ -410,7 +415,14 @@ function EmptyState({ text }: { text: string }) {
 
 function NoteRowView({ row, dim }: { row: NoteRow; dim?: boolean }) {
   return (
-    <div className={cn('flex items-baseline gap-3 py-1.5', dim && 'opacity-55 italic')}>
+    <div
+      className={cn(
+        'flex items-baseline gap-3 py-1.5',
+        dim && 'opacity-55 italic',
+        // Draft rows are slightly muted until the high-accuracy pass lands.
+        !dim && row.draft && 'opacity-75',
+      )}
+    >
       <span className="w-14 shrink-0 text-[11px] tabular-nums text-muted-foreground">
         {row.time}
       </span>
@@ -618,6 +630,15 @@ function SettingsContent(props: {
           checked={settings.notesEnabled}
           onChange={(v) => update({ notesEnabled: v })}
         />
+        {settings.notesEnabled ? (
+          <ToggleRow
+            label="Real-time note"
+            hint="Show the live draft instantly; the high-accuracy pass replaces it. Off = note builds every few minutes (cheaper when the overlay is off)."
+            checked={settings.liveNotes}
+            disabled={active}
+            onChange={(v) => update({ liveNotes: v })}
+          />
+        ) : null}
         {settings.notesEnabled ? (
         <div className="space-y-1.5">
           <div className="text-xs text-muted-foreground">Include in notes</div>

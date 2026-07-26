@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { NoteContent } from '@shared/ipc'
 
@@ -12,73 +12,151 @@ export interface TranscriptEntry {
   time: Date
   original: string
   translation: string
+  /** True once this entry came from the high-accuracy (batch) pass. */
+  refined: boolean
+}
+
+export interface RefinedSegment {
+  /** Wall-clock ms of the segment. */
+  timeMs: number
+  original: string
+  translation: string
+}
+
+interface CoveredRange {
+  startMs: number
+  endMs: number
 }
 
 /**
- * Accumulates one session's utterances (original + optional translation) and
- * writes them out as a timestamped Markdown file when the session ends.
+ * One session's note. Live (realtime draft) entries accumulate as spoken;
+ * refined chunks from the batch pass replace the draft for the audio range
+ * they cover. The file on disk is updated incrementally (debounced) so a
+ * crash mid-session loses nothing.
  */
 export class TranscriptLog {
-  private entries: TranscriptEntry[] = []
+  private liveEntries: TranscriptEntry[] = []
+  private refinedEntries: TranscriptEntry[] = []
+  private covered: CoveredRange[] = []
   private startedAt = new Date()
-  private saved = false
-  private savedPath: string | null = null
   private title: string | null = null
+  private filePath: string | null = null
+  private flushTimer: ReturnType<typeof setTimeout> | null = null
+  private finished = false
 
   constructor(
     private content: NoteContent = 'both',
-    private onEntry?: (e: TranscriptEntry) => void,
+    private onChange?: () => void,
   ) {}
 
-  add(original: string, translation: string): void {
-    const o = this.content === 'translation' ? '' : original.trim()
-    const t = this.content === 'original' ? '' : translation.trim()
-    if (!o && !t) return
-    const entry = { time: new Date(), original: o, translation: t }
-    this.entries.push(entry)
-    this.onEntry?.(entry)
+  addLive(original: string, translation: string): void {
+    const e = this.filtered(original, translation, false)
+    if (!e) return
+    this.liveEntries.push(e)
+    this.changed()
+  }
+
+  /** Replace the draft for [startMs, endMs] with refined segments. */
+  mergeRefined(startMs: number, endMs: number, segments: RefinedSegment[]): void {
+    for (const s of segments) {
+      const e = this.filtered(s.original, s.translation, true, new Date(s.timeMs))
+      if (e) this.refinedEntries.push(e)
+    }
+    this.refinedEntries.sort((a, b) => a.time.getTime() - b.time.getTime())
+    this.covered.push({ startMs, endMs })
+    this.changed()
+  }
+
+  /** A live entry is superseded once a refined chunk covers its audio range. */
+  entries(): TranscriptEntry[] {
+    // Live entries are stamped when the utterance FINALIZES, i.e. shortly
+    // after the speech itself — allow a small margin past the chunk end.
+    const MARGIN_MS = 2_500
+    const kept = this.liveEntries.filter((e) => {
+      const t = e.time.getTime()
+      return !this.covered.some((r) => t >= r.startMs && t <= r.endMs + MARGIN_MS)
+    })
+    return [...this.refinedEntries, ...kept].sort((a, b) => a.time.getTime() - b.time.getTime())
   }
 
   isEmpty(): boolean {
-    return this.entries.length === 0
-  }
-
-  /**
-   * Write the transcript to disk. Returns the file path, or null if there was
-   * nothing to save or it was saved already.
-   */
-  async save(): Promise<string | null> {
-    if (this.saved || this.isEmpty()) return null
-    this.saved = true
-
-    const dir = transcriptsDir()
-    await mkdir(dir, { recursive: true })
-    const path = join(dir, `${fileStamp(this.startedAt)}.md`)
-    await writeFile(path, this.toMarkdown(), 'utf8')
-    this.savedPath = path
-    return path
+    return this.refinedEntries.length === 0 && this.liveEntries.length === 0
   }
 
   /** Text sample for AI title generation (prefers the translated lines). */
   sampleText(maxChars = 6000): string {
-    return this.entries
+    return this.entries()
       .map((e) => e.translation || e.original)
       .join('\n')
       .slice(0, maxChars)
   }
 
-  /** Set the AI-generated title and rewrite the saved file's heading. */
+  /** Set the AI-generated title and rewrite the file's heading. */
   async applyTitle(title: string): Promise<void> {
     const clean = title.replace(/\s+/g, ' ').replace(/^["'#\s]+|["'.\s]+$/g, '').slice(0, 80)
-    if (!clean || !this.savedPath) return
+    if (!clean) return
     this.title = clean
-    await writeFile(this.savedPath, this.toMarkdown(), 'utf8')
+    await this.flush()
+  }
+
+  /** Debounced incremental write — keeps the on-disk note crash-safe. */
+  requestFlush(): void {
+    if (this.finished || this.flushTimer) return
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null
+      void this.flush().catch((err) => console.error('[transcript] flush failed:', err))
+    }, 1_000)
+  }
+
+  async flush(): Promise<string | null> {
+    if (this.isEmpty()) return null
+    if (!this.filePath) {
+      const dir = transcriptsDir()
+      await mkdir(dir, { recursive: true })
+      this.filePath = join(dir, `${fileStamp(this.startedAt)}.md`)
+    }
+    await writeFile(this.filePath, this.toMarkdown(), 'utf8')
+    return this.filePath
+  }
+
+  /**
+   * Final write at session end. When note saving is disabled, any
+   * incrementally-written file is removed instead.
+   */
+  async finish(save: boolean): Promise<string | null> {
+    this.finished = true
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    if (!save) {
+      if (this.filePath) await unlink(this.filePath).catch(() => undefined)
+      return null
+    }
+    return this.flush()
+  }
+
+  private filtered(
+    original: string,
+    translation: string,
+    refined: boolean,
+    time = new Date(),
+  ): TranscriptEntry | null {
+    const o = this.content === 'translation' ? '' : original.trim()
+    const t = this.content === 'original' ? '' : translation.trim()
+    if (!o && !t) return null
+    return { time, original: o, translation: t, refined }
+  }
+
+  private changed(): void {
+    this.onChange?.()
+    this.requestFlush()
   }
 
   private toMarkdown(): string {
     const heading = this.title ?? `Transcript — ${humanStamp(this.startedAt)}`
     const lines: string[] = [`# ${heading}`, '']
-    for (const e of this.entries) {
+    for (const e of this.entries()) {
       const clock = e.time.toTimeString().slice(0, 8)
       if (e.original) lines.push(`**[${clock}]** ${e.original}`)
       else lines.push(`**[${clock}]**`)

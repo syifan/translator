@@ -27,6 +27,12 @@ export interface Settings {
   displayId: number | null
   /** Save a note (Markdown file) when a session ends. Off = live view only. */
   notesEnabled: boolean
+  /**
+   * Show the realtime draft in the note immediately (replaced by the
+   * high-accuracy pass). Off = the note builds from refined chunks only, and
+   * no realtime engine runs unless the overlay needs one.
+   */
+  liveNotes: boolean
   /** What the saved note (and live transcript view) contains. */
   noteContent: NoteContent
 }
@@ -49,6 +55,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showTranslation: true,
   displayId: null,
   notesEnabled: true,
+  liveNotes: true,
   noteContent: 'both',
 }
 
@@ -109,12 +116,14 @@ export interface TranscriptSavedPayload {
   fileName: string
 }
 
-/** One finalized utterance, streamed to the control window as it is logged. */
+/** One note entry, sent to the control window in full-list replacements. */
 export interface TranscriptEntryPayload {
-  /** Epoch ms when the utterance was finalized. */
+  /** Epoch ms of the utterance. */
   time: number
   original: string
   translation: string
+  /** True once this entry came from the high-accuracy (batch) pass. */
+  refined: boolean
 }
 
 /** The in-progress (not yet finalized) utterance text. */
@@ -162,7 +171,7 @@ export const IPC = {
   displaysChanged: 'displays:changed',
   captureCommand: 'capture:command',
   transcriptSaved: 'transcript:saved',
-  transcriptEntry: 'transcript:entry',
+  transcriptReplace: 'transcript:replace',
   transcriptPartial: 'transcript:partial',
 
   // control window -> main (send)
