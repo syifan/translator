@@ -2,6 +2,7 @@ import type { BrowserWindow } from 'electron'
 import {
   IPC,
   REALTIME_TRANSLATE_CODES,
+  type NoteContent,
   type OverlayConfig,
   type SessionStatus,
   type Settings,
@@ -16,6 +17,7 @@ import { applyOverlayFloat, positionOverlay } from './windows'
 import { RealtimeTranslateClient } from './openai/realtime-translate'
 import { TranscriptionClient } from './openai/transcription'
 import { TranscriptLog } from './transcript-log'
+import { summarizeTitle } from './openai/summarize'
 import { basename } from 'node:path'
 
 /** Transcribe-only engine model (translation off). */
@@ -41,6 +43,8 @@ export class SessionManager {
   private rtLastDelta = 0
   // Full-session transcript, saved to disk when the session ends.
   private log: TranscriptLog | null = null
+  // What the note keeps, fixed at session start ('translation' needs the engine on).
+  private noteMode: NoteContent = 'both'
 
   constructor(private windows: Windows) {
     this.settings = store.get()
@@ -199,7 +203,10 @@ export class SessionManager {
 
   /** Fresh per-session log that mirrors every finalized entry to the app. */
   private startLog(): void {
-    this.log = new TranscriptLog((e) => {
+    // Translation-only notes need the translation engine; fall back to the
+    // transcript so a transcribe-only session never produces empty notes.
+    this.noteMode = this.settings.showTranslation ? this.settings.noteContent : 'original'
+    this.log = new TranscriptLog(this.noteMode, (e) => {
       this.send(this.windows.control, IPC.transcriptEntry, {
         time: e.time.getTime(),
         original: e.original,
@@ -211,8 +218,8 @@ export class SessionManager {
   /** Mirror the in-progress (unfinalized) utterance to the app. */
   private sendPartial(original: string, translation: string): void {
     this.send(this.windows.control, IPC.transcriptPartial, {
-      original,
-      translation,
+      original: this.noteMode === 'translation' ? '' : original,
+      translation: this.noteMode === 'original' ? '' : translation,
     } satisfies TranscriptPartialPayload)
   }
 
@@ -227,17 +234,35 @@ export class SessionManager {
     if (!log) return
     log.add(this.rtSrc, this.rtTrans)
     this.sendPartial('', '')
+    // Checked at save time so the user can turn it off mid-session to
+    // discard the current session's note.
+    if (!store.get().notesEnabled) {
+      console.log('[session] note taking disabled — transcript not saved')
+      return
+    }
     void log
       .save()
-      .then((path) => {
+      .then(async (path) => {
         if (!path) return
         console.log('[session] transcript saved ->', path)
-        this.send(this.windows.control, IPC.transcriptSaved, {
-          path,
-          fileName: basename(path),
-        } satisfies TranscriptSavedPayload)
+        this.notifySaved(path)
+        // Title the note with a tiny model; keep the timestamp heading on failure.
+        const key = getKey()
+        if (!key) return
+        const title = await summarizeTitle(key, log.sampleText())
+        if (!title) return
+        await log.applyTitle(title)
+        console.log('[session] transcript titled ->', title)
+        this.notifySaved(path) // re-notify so the notes list picks up the title
       })
       .catch((err) => console.error('[session] transcript save failed:', err))
+  }
+
+  private notifySaved(path: string): void {
+    this.send(this.windows.control, IPC.transcriptSaved, {
+      path,
+      fileName: basename(path),
+    } satisfies TranscriptSavedPayload)
   }
 
   private emitRtLive(): void {

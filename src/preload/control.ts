@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   IPC,
   type DisplayInfo,
+  type QuickStart,
   type SessionStatus,
   type Settings,
   type TranscriptEntryPayload,
@@ -26,10 +27,18 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener(IPC.statusChanged, listener)
   },
   getDisplays: (): Promise<DisplayInfo[]> => ipcRenderer.invoke(IPC.getDisplays),
-  openTranscriptsFolder: (): Promise<void> => ipcRenderer.invoke(IPC.openTranscriptsFolder),
   listTranscripts: (): Promise<TranscriptFileInfo[]> => ipcRenderer.invoke(IPC.listTranscripts),
   readTranscript: (fileName: string): Promise<string> =>
     ipcRenderer.invoke(IPC.readTranscript, fileName),
+  deleteTranscript: (fileName: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.deleteTranscript, fileName),
+  downloadTranscript: (fileName: string): Promise<string> =>
+    ipcRenderer.invoke(IPC.downloadTranscript, fileName),
+  listQuickStarts: (): Promise<QuickStart[]> => ipcRenderer.invoke(IPC.listQuickStarts),
+  saveQuickStart: (name: string): Promise<QuickStart[]> =>
+    ipcRenderer.invoke(IPC.saveQuickStart, name),
+  deleteQuickStart: (name: string): Promise<QuickStart[]> =>
+    ipcRenderer.invoke(IPC.deleteQuickStart, name),
   onTranscriptSaved: (cb: (p: TranscriptSavedPayload) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, p: TranscriptSavedPayload) => cb(p)
     ipcRenderer.on(IPC.transcriptSaved, listener)

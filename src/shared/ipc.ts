@@ -1,6 +1,9 @@
 // Shared contract between the main process, preloads, and renderers.
 // Channel names + payload types live here so both sides stay in sync.
 
+/** What gets written into a session's note. */
+export type NoteContent = 'both' | 'original' | 'translation'
+
 export interface Settings {
   /** Target output language (one of REALTIME_TRANSLATE_CODES). Source is auto-detected. */
   targetLang: string
@@ -22,6 +25,10 @@ export interface Settings {
   showTranslation: boolean
   /** Display the overlay shows on; null = primary display. */
   displayId: number | null
+  /** Save a note (Markdown file) when a session ends. Off = live view only. */
+  notesEnabled: boolean
+  /** What the saved note (and live transcript view) contains. */
+  noteContent: NoteContent
 }
 
 export interface DisplayInfo {
@@ -41,6 +48,8 @@ export const DEFAULT_SETTINGS: Settings = {
   showOriginal: true,
   showTranslation: true,
   displayId: null,
+  notesEnabled: true,
+  noteContent: 'both',
 }
 
 /**
@@ -114,11 +123,19 @@ export interface TranscriptPartialPayload {
   translation: string
 }
 
+/** A named settings snapshot that can be applied + started with one click. */
+export interface QuickStart {
+  name: string
+  settings: Settings
+}
+
 /** A saved transcript file, listed in the notes sidebar. */
 export interface TranscriptFileInfo {
   fileName: string
   /** Last-modified epoch ms (list is sorted newest first). */
   mtimeMs: number
+  /** Display title (from the note's # heading; AI-generated after save). */
+  title: string
 }
 
 /** IPC channel names. Suffix convention: nothing special, just unique strings. */
@@ -132,9 +149,13 @@ export const IPC = {
   startSession: 'session:start',
   stopSession: 'session:stop',
   getDisplays: 'displays:get',
-  openTranscriptsFolder: 'transcripts:open-folder',
   listTranscripts: 'transcripts:list',
   readTranscript: 'transcripts:read',
+  deleteTranscript: 'transcripts:delete',
+  downloadTranscript: 'transcripts:download',
+  listQuickStarts: 'quickstarts:list',
+  saveQuickStart: 'quickstarts:save',
+  deleteQuickStart: 'quickstarts:delete',
 
   // main -> control window (send)
   statusChanged: 'session:status',

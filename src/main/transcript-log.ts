@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { NoteContent } from '@shared/ipc'
 
 /** Where saved session transcripts live (inside Electron's userData dir). */
 export function transcriptsDir(): string {
@@ -21,12 +22,17 @@ export class TranscriptLog {
   private entries: TranscriptEntry[] = []
   private startedAt = new Date()
   private saved = false
+  private savedPath: string | null = null
+  private title: string | null = null
 
-  constructor(private onEntry?: (e: TranscriptEntry) => void) {}
+  constructor(
+    private content: NoteContent = 'both',
+    private onEntry?: (e: TranscriptEntry) => void,
+  ) {}
 
   add(original: string, translation: string): void {
-    const o = original.trim()
-    const t = translation.trim()
+    const o = this.content === 'translation' ? '' : original.trim()
+    const t = this.content === 'original' ? '' : translation.trim()
     if (!o && !t) return
     const entry = { time: new Date(), original: o, translation: t }
     this.entries.push(entry)
@@ -49,11 +55,29 @@ export class TranscriptLog {
     await mkdir(dir, { recursive: true })
     const path = join(dir, `${fileStamp(this.startedAt)}.md`)
     await writeFile(path, this.toMarkdown(), 'utf8')
+    this.savedPath = path
     return path
   }
 
+  /** Text sample for AI title generation (prefers the translated lines). */
+  sampleText(maxChars = 6000): string {
+    return this.entries
+      .map((e) => e.translation || e.original)
+      .join('\n')
+      .slice(0, maxChars)
+  }
+
+  /** Set the AI-generated title and rewrite the saved file's heading. */
+  async applyTitle(title: string): Promise<void> {
+    const clean = title.replace(/\s+/g, ' ').replace(/^["'#\s]+|["'.\s]+$/g, '').slice(0, 80)
+    if (!clean || !this.savedPath) return
+    this.title = clean
+    await writeFile(this.savedPath, this.toMarkdown(), 'utf8')
+  }
+
   private toMarkdown(): string {
-    const lines: string[] = [`# Transcript — ${humanStamp(this.startedAt)}`, '']
+    const heading = this.title ?? `Transcript — ${humanStamp(this.startedAt)}`
+    const lines: string[] = [`# ${heading}`, '']
     for (const e of this.entries) {
       const clock = e.time.toTimeString().slice(0, 8)
       if (e.original) lines.push(`**[${clock}]** ${e.original}`)

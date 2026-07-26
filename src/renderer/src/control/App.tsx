@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FolderOpen, Settings as SettingsIcon } from 'lucide-react'
+import { Check, Download, Settings as SettingsIcon, Trash2, Zap } from 'lucide-react'
 import {
   REALTIME_TRANSLATE_CODES,
   type DisplayInfo,
+  type QuickStart,
   type SessionStatus,
   type Settings,
   type TranscriptEntryPayload,
@@ -81,6 +82,9 @@ export function App() {
   const [selected, setSelected] = useState<string>('live')
   const [noteRows, setNoteRows] = useState<NoteRow[]>([])
   const [noteError, setNoteError] = useState<string | null>(null)
+  // File name whose download just finished (briefly shows a checkmark).
+  const [downloaded, setDownloaded] = useState<string | null>(null)
+  const [quickstarts, setQuickstarts] = useState<QuickStart[]>([])
   // Live transcript state.
   const [entries, setEntries] = useState<TranscriptEntryPayload[]>([])
   const [partial, setPartial] = useState<TranscriptPartialPayload>({ original: '', translation: '' })
@@ -94,6 +98,7 @@ export function App() {
     void window.api.getSettings().then(setSettings)
     void window.api.hasKey().then(setHasKey)
     void window.api.getDisplays().then(setDisplays)
+    void window.api.listQuickStarts().then(setQuickstarts)
     refreshNotes()
     const offDisplays = window.api.onDisplaysChanged(setDisplays)
     const offStatus = window.api.onStatus((s) => {
@@ -146,11 +151,12 @@ export function App() {
     void window.api.setSettings(partialSettings)
   }
 
-  async function start() {
-    if (!settings || busy) return
+  async function start(withSettings?: Settings) {
+    const s = withSettings ?? settings
+    if (!s || busy) return
     setBusy(true)
     try {
-      await startCapture({ system: settings.systemAudioEnabled, mic: settings.micEnabled })
+      await startCapture({ system: s.systemAudioEnabled, mic: s.micEnabled })
       await window.api.startSession()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -169,6 +175,26 @@ export function App() {
       if (isCapturing()) await stopCapture()
       setBusy(false)
     }
+  }
+
+  async function deleteNote(fileName: string) {
+    await window.api.deleteTranscript(fileName)
+    if (selected === fileName) setSelected('live')
+    refreshNotes()
+  }
+
+  /** Apply a saved quick start's settings, then start the session with them. */
+  async function runQuickStart(qs: QuickStart) {
+    if (busy || active) return
+    const next = await window.api.setSettings(qs.settings)
+    setSettings(next)
+    await start(next)
+  }
+
+  async function downloadNote(fileName: string) {
+    await window.api.downloadTranscript(fileName)
+    setDownloaded(fileName)
+    setTimeout(() => setDownloaded((cur) => (cur === fileName ? null : cur)), 1500)
   }
 
   const meta = STATUS_META[status.state]
@@ -202,10 +228,27 @@ export function App() {
             <SettingsIcon />
             <span className="sr-only">Settings</span>
           </Button>
+          {quickstarts.map((qs) => (
+            <Button
+              key={qs.name}
+              size="sm"
+              variant="secondary"
+              title={`Quick start: ${qs.name} — right-click to delete`}
+              onClick={() => void runQuickStart(qs)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                void window.api.deleteQuickStart(qs.name).then(setQuickstarts)
+              }}
+              disabled={busy || active || !hasKey}
+            >
+              <Zap className="size-3.5" />
+              {qs.name}
+            </Button>
+          ))}
           <Button
             size="sm"
             variant={active ? 'destructive' : 'default'}
-            onClick={active ? stop : start}
+            onClick={active ? stop : () => start()}
             disabled={busy || (!active && (!hasKey || inputsOff))}
           >
             {active ? 'Stop' : busy ? 'Starting…' : 'Start listening'}
@@ -231,31 +274,51 @@ export function App() {
               <span className="truncate">{active ? 'Live session' : 'Current session'}</span>
             </button>
             {notes.map((n) => (
-              <button
+              <div
                 key={n.fileName}
+                role="button"
+                tabIndex={0}
+                title={n.fileName.replace(/\.md$/, '')}
                 className={cn(
-                  'flex w-full cursor-pointer items-center rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-accent/60',
+                  'group flex w-full cursor-pointer items-center gap-1 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-accent/60',
                   selected === n.fileName && 'bg-accent text-accent-foreground',
                 )}
                 onClick={() => setSelected(n.fileName)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') setSelected(n.fileName)
+                }}
               >
-                <span className="truncate">{n.fileName.replace(/\.md$/, '')}</span>
-              </button>
+                <span className="min-w-0 flex-1 truncate">{n.title}</span>
+                {downloaded === n.fileName ? (
+                  <Check className="size-3.5 shrink-0 text-emerald-400" />
+                ) : (
+                  <button
+                    className="hidden shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-foreground group-hover:block"
+                    title="Download to Downloads folder"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void downloadNote(n.fileName)
+                    }}
+                  >
+                    <Download className="size-3.5" />
+                  </button>
+                )}
+                <button
+                  className="hidden shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-red-400 group-hover:block"
+                  title="Move to Trash"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void deleteNote(n.fileName)
+                  }}
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </div>
             ))}
             {notes.length === 0 ? (
               <p className="px-2.5 py-1.5 text-xs text-muted-foreground">No saved notes yet.</p>
             ) : null}
           </nav>
-          <div className="border-t p-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full text-muted-foreground"
-              onClick={() => void window.api.openTranscriptsFolder()}
-            >
-              <FolderOpen /> Open folder
-            </Button>
-          </div>
         </aside>
 
         {/* Note / live transcript view */}
@@ -328,6 +391,8 @@ export function App() {
             active={active}
             displays={displays}
             update={update}
+            quickstarts={quickstarts}
+            setQuickstarts={setQuickstarts}
           />
         </DialogContent>
       </Dialog>
@@ -421,10 +486,21 @@ function SettingsContent(props: {
   active: boolean
   displays: DisplayInfo[]
   update: (p: Partial<Settings>) => void
+  quickstarts: QuickStart[]
+  setQuickstarts: (q: QuickStart[]) => void
 }) {
-  const { settings, hasKey, setHasKey, active, displays, update } = props
+  const { settings, hasKey, setHasKey, active, displays, update, quickstarts, setQuickstarts } =
+    props
   const [keyInput, setKeyInput] = useState('')
   const [keySaving, setKeySaving] = useState(false)
+  const [qsName, setQsName] = useState('')
+
+  async function saveQuickStart() {
+    const name = qsName.trim()
+    if (!name) return
+    setQuickstarts(await window.api.saveQuickStart(name))
+    setQsName('')
+  }
 
   async function saveKey() {
     const key = keyInput.trim()
@@ -535,6 +611,39 @@ function SettingsContent(props: {
         ) : null}
       </SettingsSection>
 
+      <SettingsSection title="Notes">
+        <ToggleRow
+          label="Save notes"
+          hint="Keep a Markdown note of each session (can be turned off mid-session)"
+          checked={settings.notesEnabled}
+          onChange={(v) => update({ notesEnabled: v })}
+        />
+        {settings.notesEnabled ? (
+        <div className="space-y-1.5">
+          <div className="text-xs text-muted-foreground">Include in notes</div>
+          <Select
+            value={settings.noteContent}
+            disabled={active}
+            onValueChange={(v) => update({ noteContent: v as Settings['noteContent'] })}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="both">Transcript + translation</SelectItem>
+              <SelectItem value="original">Transcript only</SelectItem>
+              <SelectItem value="translation">Translation only</SelectItem>
+            </SelectContent>
+          </Select>
+          {!settings.showTranslation && settings.noteContent !== 'original' ? (
+            <p className="text-xs text-muted-foreground">
+              Translation is off, so notes fall back to the transcript.
+            </p>
+          ) : null}
+        </div>
+        ) : null}
+      </SettingsSection>
+
       <SettingsSection title="Overlay UI">
         {displays.length > 1 ? (
           <div className="space-y-1.5">
@@ -589,6 +698,42 @@ function SettingsContent(props: {
           step={1}
           onChange={(v) => update({ maxLines: v })}
         />
+      </SettingsSection>
+
+      <SettingsSection title="Quick start">
+        {quickstarts.map((qs) => (
+          <div key={qs.name} className="flex items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-1.5 text-sm">
+              <Zap className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">{qs.name}</span>
+            </span>
+            <button
+              className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground hover:text-red-400"
+              title="Delete quick start"
+              onClick={async () => setQuickstarts(await window.api.deleteQuickStart(qs.name))}
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <Input
+            placeholder="Name (e.g. “Meeting → EN”)"
+            value={qsName}
+            className="h-8"
+            onChange={(e) => setQsName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void saveQuickStart()
+            }}
+          />
+          <Button size="sm" onClick={saveQuickStart} disabled={!qsName.trim()}>
+            Save
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Saves the settings above under a name — it appears as a one-click start button in the
+          toolbar.
+        </p>
         <p className="pt-1 text-center text-[11px] text-muted-foreground">
           ⌘⇧T stop · ⌘⇧O toggle overlay
         </p>

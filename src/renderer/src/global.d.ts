@@ -1,5 +1,6 @@
 import type {
   DisplayInfo,
+  QuickStart,
   OverlayConfig,
   SessionStatus,
   Settings,
@@ -23,9 +24,13 @@ declare global {
       onStatus(cb: (s: SessionStatus) => void): () => void
       getDisplays(): Promise<DisplayInfo[]>
       onDisplaysChanged(cb: (d: DisplayInfo[]) => void): () => void
-      openTranscriptsFolder(): Promise<void>
       listTranscripts(): Promise<TranscriptFileInfo[]>
       readTranscript(fileName: string): Promise<string>
+      deleteTranscript(fileName: string): Promise<void>
+      downloadTranscript(fileName: string): Promise<string>
+      listQuickStarts(): Promise<QuickStart[]>
+      saveQuickStart(name: string): Promise<QuickStart[]>
+      deleteQuickStart(name: string): Promise<QuickStart[]>
       onTranscriptSaved(cb: (p: TranscriptSavedPayload) => void): () => void
       onTranscriptEntry(cb: (p: TranscriptEntryPayload) => void): () => void
       onTranscriptPartial(cb: (p: TranscriptPartialPayload) => void): () => void
