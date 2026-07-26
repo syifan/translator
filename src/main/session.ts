@@ -17,6 +17,8 @@ import { applyOverlayFloat, positionOverlay } from './windows'
 import { RealtimeTranslateClient } from './openai/realtime-translate'
 import { TranscriptionClient } from './openai/transcription'
 import { TranscriptLog } from './transcript-log'
+import { AudioChunker } from './audio-chunker'
+import { NoteRefiner } from './note-refiner'
 import { summarizeTitle } from './openai/summarize'
 import { basename } from 'node:path'
 
@@ -30,7 +32,8 @@ interface Windows {
 
 /**
  * Orchestrates a live session: audio (sent up from the control renderer) ->
- * gpt-realtime-translate (streams source + translated transcript) -> overlay.
+ * realtime engines (overlay subtitles + live note draft) and, in parallel,
+ * the chunked batch pipeline that upgrades the note to high accuracy.
  */
 export class SessionManager {
   private rt: RealtimeTranslateClient | null = null
@@ -41,10 +44,17 @@ export class SessionManager {
   private rtSrc = ''
   private rtTrans = ''
   private rtLastDelta = 0
-  // Full-session transcript, saved to disk when the session ends.
+  // Full-session note, incrementally saved; upgraded chunk-by-chunk.
   private log: TranscriptLog | null = null
-  // What the note keeps, fixed at session start ('translation' needs the engine on).
+  private recorder: AudioChunker | null = null
+  private refiner: NoteRefiner | null = null
+  // The log whose updates the control window is currently watching. Kept
+  // after stop so late-arriving refined chunks still update the view.
+  private activeLog: TranscriptLog | null = null
+  private replaceTimer: ReturnType<typeof setTimeout> | null = null
+  // Session-scoped copies of settings that must not change mid-run.
   private noteMode: NoteContent = 'both'
+  private liveNotes = true
 
   constructor(private windows: Windows) {
     this.settings = store.get()
@@ -85,12 +95,34 @@ export class SessionManager {
       return
     }
 
-    // Transcribe-only: no translation model in the loop (cheaper). Also the
-    // engine when both overlay lines are off (in-app transcript only).
+    // The realtime engines exist for the overlay and the live note draft.
+    // With all three off, the batch pipeline alone builds the note.
+    const needRealtime =
+      this.settings.showOriginal || this.settings.showTranslation || this.settings.liveNotes
+
+    if (!needRealtime && !this.settings.notesEnabled) {
+      this.setStatus({
+        state: 'error',
+        message:
+          'Nothing to do: enable captions, translation, the real-time note, or note saving in Settings.',
+      })
+      return
+    }
+
+    this.setStatus({ state: 'starting' })
+    this.pushOverlayConfig()
+    this.startLog(key)
+
+    // Notes-only mode: no realtime engine at all (cheapest). The batch
+    // pipeline transcribes chunks as they fill.
+    if (!needRealtime) {
+      console.log('[session] notes-only mode (no realtime engine)')
+      this.setStatus({ state: 'running' })
+      return
+    }
+
+    // Transcribe-only: no translation model in the loop (cheaper).
     if (!this.settings.showTranslation) {
-      this.setStatus({ state: 'starting' })
-      this.pushOverlayConfig()
-      this.startLog()
       console.log('[session] transcribe-only ->', TRANSCRIBE_MODEL)
       this.tx = new TranscriptionClient({
         apiKey: key,
@@ -98,12 +130,14 @@ export class SessionManager {
         onOpen: () => this.setStatus({ state: 'running' }),
         onDelta: (id, text) => {
           this.emitUnit(id, text, '', false)
-          this.sendPartial(text, '')
+          if (this.liveNotes) this.sendPartial(text, '')
         },
         onCompleted: (id, text) => {
-          this.log?.add(text, '')
+          if (this.liveNotes) {
+            this.log?.addLive(text, '')
+            this.sendPartial('', '')
+          }
           this.emitUnit(id, text, '', true)
-          this.sendPartial('', '')
         },
         onError: (message) => this.setStatus({ state: 'error', message }),
         onClose: () => {
@@ -125,9 +159,6 @@ export class SessionManager {
       return
     }
 
-    this.setStatus({ state: 'starting' })
-    this.pushOverlayConfig()
-    this.startLog()
     this.rtSrc = ''
     this.rtTrans = ''
 
@@ -140,13 +171,13 @@ export class SessionManager {
         this.rtTouch()
         this.rtSrc += d
         this.emitRtLive()
-        this.sendPartial(this.rtSrc, this.rtTrans)
+        if (this.liveNotes) this.sendPartial(this.rtSrc, this.rtTrans)
       },
       onTranslationDelta: (d) => {
         this.rtTouch()
         this.rtTrans += d
         this.emitRtLive()
-        this.sendPartial(this.rtSrc, this.rtTrans)
+        if (this.liveNotes) this.sendPartial(this.rtSrc, this.rtTrans)
       },
       onError: (message) => this.setStatus({ state: 'error', message }),
       onClose: () => {
@@ -173,6 +204,7 @@ export class SessionManager {
   }
 
   pushAudio(buf: ArrayBuffer): void {
+    this.recorder?.append(buf)
     this.rt?.sendAudio(buf)
     this.tx?.sendAudio(buf)
   }
@@ -194,75 +226,11 @@ export class SessionManager {
     const now = Date.now()
     if (now - this.rtLastDelta > 2500) {
       // The pause marks the end of an utterance; log it before discarding.
-      this.log?.add(this.rtSrc, this.rtTrans)
+      if (this.liveNotes) this.log?.addLive(this.rtSrc, this.rtTrans)
       this.rtSrc = ''
       this.rtTrans = ''
     }
     this.rtLastDelta = now
-  }
-
-  /** Fresh per-session log that mirrors every finalized entry to the app. */
-  private startLog(): void {
-    // Translation-only notes need the translation engine; fall back to the
-    // transcript so a transcribe-only session never produces empty notes.
-    this.noteMode = this.settings.showTranslation ? this.settings.noteContent : 'original'
-    this.log = new TranscriptLog(this.noteMode, (e) => {
-      this.send(this.windows.control, IPC.transcriptEntry, {
-        time: e.time.getTime(),
-        original: e.original,
-        translation: e.translation,
-      } satisfies TranscriptEntryPayload)
-    })
-  }
-
-  /** Mirror the in-progress (unfinalized) utterance to the app. */
-  private sendPartial(original: string, translation: string): void {
-    this.send(this.windows.control, IPC.transcriptPartial, {
-      original: this.noteMode === 'translation' ? '' : original,
-      translation: this.noteMode === 'original' ? '' : translation,
-    } satisfies TranscriptPartialPayload)
-  }
-
-  private subtitlesEnabled(): boolean {
-    return this.settings.showOriginal || this.settings.showTranslation
-  }
-
-  /** Flush pending text, save the transcript, and tell the control window. */
-  private finishLog(): void {
-    const log = this.log
-    this.log = null
-    if (!log) return
-    log.add(this.rtSrc, this.rtTrans)
-    this.sendPartial('', '')
-    // Checked at save time so the user can turn it off mid-session to
-    // discard the current session's note.
-    if (!store.get().notesEnabled) {
-      console.log('[session] note taking disabled — transcript not saved')
-      return
-    }
-    void log
-      .save()
-      .then(async (path) => {
-        if (!path) return
-        console.log('[session] transcript saved ->', path)
-        this.notifySaved(path)
-        // Title the note with a tiny model; keep the timestamp heading on failure.
-        const key = getKey()
-        if (!key) return
-        const title = await summarizeTitle(key, log.sampleText())
-        if (!title) return
-        await log.applyTitle(title)
-        console.log('[session] transcript titled ->', title)
-        this.notifySaved(path) // re-notify so the notes list picks up the title
-      })
-      .catch((err) => console.error('[session] transcript save failed:', err))
-  }
-
-  private notifySaved(path: string): void {
-    this.send(this.windows.control, IPC.transcriptSaved, {
-      path,
-      fileName: basename(path),
-    } satisfies TranscriptSavedPayload)
   }
 
   private emitRtLive(): void {
@@ -277,6 +245,100 @@ export class SessionManager {
       translation,
       isFinal,
     } satisfies SubtitlePayload)
+  }
+
+  /** Fresh per-session log + (when notes are on) the batch-refine pipeline. */
+  private startLog(apiKey: string): void {
+    this.noteMode = this.settings.showTranslation ? this.settings.noteContent : 'original'
+    this.liveNotes = this.settings.liveNotes
+    const log = new TranscriptLog(this.noteMode, () => this.sendReplace(log))
+    this.log = log
+    this.activeLog = log
+    this.sendReplace(log) // clear the previous session's view
+
+    if (this.settings.notesEnabled) {
+      const translateTo =
+        this.settings.showTranslation && this.noteMode !== 'original'
+          ? this.settings.targetLang
+          : null
+      const refiner = new NoteRefiner({ apiKey, log, translateTo })
+      this.refiner = refiner
+      this.recorder = new AudioChunker((chunk) => refiner.enqueue(chunk))
+    }
+  }
+
+  /** Debounced full-list push — the view mirrors the note (draft + refined). */
+  private sendReplace(log: TranscriptLog): void {
+    if (this.replaceTimer) return
+    this.replaceTimer = setTimeout(() => {
+      this.replaceTimer = null
+      if (this.activeLog !== log) return
+      const entries: TranscriptEntryPayload[] = log.entries().map((e) => ({
+        time: e.time.getTime(),
+        original: e.original,
+        translation: e.translation,
+        refined: e.refined,
+      }))
+      this.send(this.windows.control, IPC.transcriptReplace, entries)
+    }, 150)
+  }
+
+  /** Mirror the in-progress (unfinalized) utterance to the app. */
+  private sendPartial(original: string, translation: string): void {
+    this.send(this.windows.control, IPC.transcriptPartial, {
+      original: this.noteMode === 'translation' ? '' : original,
+      translation: this.noteMode === 'original' ? '' : translation,
+    } satisfies TranscriptPartialPayload)
+  }
+
+  private subtitlesEnabled(): boolean {
+    return this.settings.showOriginal || this.settings.showTranslation
+  }
+
+  /** Flush trailing audio + draft, then finalize the note in the background. */
+  private finishLog(): void {
+    const log = this.log
+    const recorder = this.recorder
+    const refiner = this.refiner
+    this.log = null
+    this.recorder = null
+    this.refiner = null
+    if (!log) return
+    recorder?.final()
+    if (this.liveNotes) log.addLive(this.rtSrc, this.rtTrans)
+    this.sendPartial('', '')
+    void this.finalizeNote(log, refiner)
+  }
+
+  /** Waits for pending refined chunks, saves (or discards), then titles. */
+  private async finalizeNote(log: TranscriptLog, refiner: NoteRefiner | null): Promise<void> {
+    try {
+      await refiner?.drain()
+      // Checked at save time so the user can turn saving off mid-session to
+      // discard the current session's note.
+      const save = store.get().notesEnabled
+      const path = await log.finish(save)
+      if (!save) console.log('[session] note taking disabled — transcript not saved')
+      if (!path) return
+      console.log('[session] transcript saved ->', path)
+      this.notifySaved(path)
+      const key = getKey()
+      if (!key) return
+      const title = await summarizeTitle(key, log.sampleText())
+      if (!title) return
+      await log.applyTitle(title)
+      console.log('[session] transcript titled ->', title)
+      this.notifySaved(path) // re-notify so the notes list picks up the title
+    } catch (err) {
+      console.error('[session] note finalize failed:', err)
+    }
+  }
+
+  private notifySaved(path: string): void {
+    this.send(this.windows.control, IPC.transcriptSaved, {
+      path,
+      fileName: basename(path),
+    } satisfies TranscriptSavedPayload)
   }
 
   private setStatus(status: SessionStatus): void {
