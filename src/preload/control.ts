@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke(IPC.deleteTranscript, fileName),
   downloadTranscript: (fileName: string): Promise<string> =>
     ipcRenderer.invoke(IPC.downloadTranscript, fileName),
+  retranscribeTranscript: (fileName: string, language: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.retranscribeTranscript, fileName, language),
   listQuickStarts: (): Promise<QuickStart[]> => ipcRenderer.invoke(IPC.listQuickStarts),
   saveQuickStart: (name: string): Promise<QuickStart[]> =>
     ipcRenderer.invoke(IPC.saveQuickStart, name),

@@ -13,15 +13,24 @@ export interface BatchSegment {
   text: string
 }
 
+export interface BatchResult {
+  segments: BatchSegment[]
+  /** Language whisper detected (or was pinned to), e.g. "english". */
+  language: string | null
+}
+
 export async function batchTranscribe(
   apiKey: string,
   wav: Buffer,
   prompt?: string,
-): Promise<BatchSegment[]> {
+  /** ISO code (e.g. "en") to pin the language; omit for auto-detect. */
+  language?: string,
+): Promise<BatchResult> {
   const form = new FormData()
   form.append('file', new Blob([new Uint8Array(wav)], { type: 'audio/wav' }), 'chunk.wav')
   form.append('model', TRANSCRIBE_BATCH_MODEL)
   form.append('response_format', 'verbose_json')
+  if (language) form.append('language', language)
   // Carrying the previous chunk's tail keeps terminology/spelling consistent
   // across chunk boundaries.
   if (prompt) form.append('prompt', prompt.slice(-800))
@@ -37,14 +46,22 @@ export async function batchTranscribe(
   const data = (await res.json()) as {
     text?: string
     duration?: number
+    language?: string
     segments?: { start: number; end: number; text: string }[]
   }
+  const detected = data.language ?? null
   if (Array.isArray(data.segments) && data.segments.length > 0) {
-    return data.segments
-      .map((s) => ({ startSec: s.start, endSec: s.end, text: s.text.trim() }))
-      .filter((s) => s.text)
+    return {
+      segments: data.segments
+        .map((s) => ({ startSec: s.start, endSec: s.end, text: s.text.trim() }))
+        .filter((s) => s.text),
+      language: detected,
+    }
   }
   // Fallback: no segment detail — return the whole text as one segment.
   const text = data.text?.trim()
-  return text ? [{ startSec: 0, endSec: data.duration ?? 0, text }] : []
+  return {
+    segments: text ? [{ startSec: 0, endSec: data.duration ?? 0, text }] : [],
+    language: detected,
+  }
 }

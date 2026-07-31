@@ -9,6 +9,8 @@ import * as secrets from './secrets'
 import { positionOverlay } from './windows'
 import { transcriptsDir } from './transcript-log'
 import { deleteQuickStart, listQuickStarts, saveQuickStart } from './quickstarts'
+import { deleteAudio, hasAudio, pruneAudio } from './audio-store'
+import { retranscribeNote } from './retranscribe'
 
 /** Title from a note's "# " heading; falls back to the file name's timestamp. */
 async function noteTitle(path: string, fileName: string): Promise<string> {
@@ -80,7 +82,12 @@ export function registerIpc(
         .filter((n) => n.endsWith('.md'))
         .map(async (n) => {
           const s = await stat(join(dir, n))
-          return { fileName: n, mtimeMs: s.mtimeMs, title: await noteTitle(join(dir, n), n) }
+          return {
+            fileName: n,
+            mtimeMs: s.mtimeMs,
+            title: await noteTitle(join(dir, n), n),
+            hasAudio: hasAudio(n.replace(/\.md$/, '')),
+          }
         }),
     )
     return infos.sort((a, b) => b.mtimeMs - a.mtimeMs)
@@ -92,7 +99,26 @@ export function registerIpc(
     }
     // Recoverable delete: move to the macOS Trash instead of unlinking.
     await shell.trashItem(join(transcriptsDir(), fileName))
+    await deleteAudio(fileName.replace(/\.md$/, ''))
   })
+
+  ipcMain.handle(IPC.retranscribeTranscript, async (_e, fileName: string, language: string) => {
+    if (basename(fileName) !== fileName || !fileName.endsWith('.md')) {
+      throw new Error('Invalid transcript file name')
+    }
+    await retranscribeNote(fileName, language)
+  })
+
+  // Startup cleanup: drop audio for deleted notes + enforce the size cap.
+  void (async () => {
+    try {
+      const names = await readdir(transcriptsDir()).catch(() => [] as string[])
+      const stems = new Set(names.filter((n) => n.endsWith('.md')).map((n) => n.replace(/\.md$/, '')))
+      await pruneAudio(stems)
+    } catch (err) {
+      console.error('[audio-store] prune failed:', err)
+    }
+  })()
 
   ipcMain.handle(IPC.downloadTranscript, async (_e, fileName: string): Promise<string> => {
     if (basename(fileName) !== fileName || !fileName.endsWith('.md')) {

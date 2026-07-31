@@ -1,6 +1,6 @@
 {
   "name": "live-translator",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Live system-audio subtitle translator overlay (Electron + OpenAI Realtime)",
   "type": "commonjs",
   "main": "./out/main/index.js",

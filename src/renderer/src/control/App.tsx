@@ -28,7 +28,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { isCapturing, startCapture, stopCapture } from './capture'
+import { isCapturing, prewarmCapture, startCapture, stopCapture } from './capture'
 
 // Target languages = the output languages gpt-realtime-translate supports.
 const LANGUAGES = Object.keys(REALTIME_TRANSLATE_CODES)
@@ -86,6 +86,8 @@ export function App() {
   const [noteError, setNoteError] = useState<string | null>(null)
   // File name whose download just finished (briefly shows a checkmark).
   const [downloaded, setDownloaded] = useState<string | null>(null)
+  const [retransLang, setRetransLang] = useState('Auto')
+  const [retranscribing, setRetranscribing] = useState(false)
   const [quickstarts, setQuickstarts] = useState<QuickStart[]>([])
   // Live transcript state.
   const [entries, setEntries] = useState<TranscriptEntryPayload[]>([])
@@ -102,6 +104,7 @@ export function App() {
     void window.api.getDisplays().then(setDisplays)
     void window.api.listQuickStarts().then(setQuickstarts)
     refreshNotes()
+    prewarmCapture()
     const offDisplays = window.api.onDisplaysChanged(setDisplays)
     const offStatus = window.api.onStatus((s) => {
       setStatus(s)
@@ -128,16 +131,19 @@ export function App() {
     }
   }, [refreshNotes])
 
-  // Load a saved note when selected.
-  useEffect(() => {
-    if (selected === 'live') return
+  const loadNote = useCallback((fileName: string) => {
     setNoteRows([])
     setNoteError(null)
     window.api
-      .readTranscript(selected)
+      .readTranscript(fileName)
       .then((md) => setNoteRows(parseTranscriptMd(md)))
       .catch(() => setNoteError('Could not read this transcript.'))
-  }, [selected])
+  }, [])
+
+  // Load a saved note when selected.
+  useEffect(() => {
+    if (selected !== 'live') loadNote(selected)
+  }, [selected, loadNote])
 
   // Keep the live transcript pinned to the bottom as text streams in.
   useEffect(() => {
@@ -158,8 +164,14 @@ export function App() {
     if (!s || busy) return
     setBusy(true)
     try {
-      await startCapture({ system: s.systemAudioEnabled, mic: s.micEnabled })
-      await window.api.startSession()
+      // Capture setup (CoreAudio tap) and the OpenAI WebSocket connect are
+      // independent and both slow — run them in parallel. Audio frames sent
+      // before the socket opens are dropped harmlessly.
+      const [captureResult] = await Promise.allSettled([
+        startCapture({ system: s.systemAudioEnabled, mic: s.micEnabled }),
+        window.api.startSession(),
+      ])
+      if (captureResult.status === 'rejected') throw captureResult.reason
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       window.capture.reportError(message)
@@ -191,6 +203,21 @@ export function App() {
     const next = await window.api.setSettings(qs.settings)
     setSettings(next)
     await start(next)
+  }
+
+  async function retranscribe() {
+    if (selected === 'live' || retranscribing) return
+    setRetranscribing(true)
+    setNoteError(null)
+    try {
+      await window.api.retranscribeTranscript(selected, retransLang)
+      loadNote(selected)
+      refreshNotes()
+    } catch {
+      setNoteError('Re-transcription failed — check the API key and try again.')
+    } finally {
+      setRetranscribing(false)
+    }
   }
 
   async function downloadNote(fileName: string) {
@@ -341,6 +368,39 @@ export function App() {
                 Settings
               </button>
               {!hasKey ? ' to start.' : '.'}
+            </div>
+          ) : null}
+
+          {selected !== 'live' ? (
+            <div className="flex items-center gap-2 border-b px-4 py-2">
+              <span className="text-xs text-muted-foreground">Re-transcribe as</span>
+              <Select value={retransLang} onValueChange={setRetransLang} disabled={retranscribing}>
+                <SelectTrigger className="h-7 w-40 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Auto">Auto-detect</SelectItem>
+                  {LANGUAGES.map((l) => (
+                    <SelectItem key={l} value={l}>
+                      {l}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7"
+                disabled={retranscribing || !notes.find((n) => n.fileName === selected)?.hasAudio}
+                onClick={() => void retranscribe()}
+              >
+                {retranscribing ? 'Re-transcribing…' : 'Re-transcribe'}
+              </Button>
+              {!notes.find((n) => n.fileName === selected)?.hasAudio ? (
+                <span className="text-xs text-muted-foreground">
+                  No audio stored for this note.
+                </span>
+              ) : null}
             </div>
           ) : null}
 
@@ -581,6 +641,27 @@ function SettingsContent(props: {
           disabled={active}
           onChange={(v) => update({ micEnabled: v })}
         />
+        <div className="space-y-1.5">
+          <div className="text-xs text-muted-foreground">Spoken language</div>
+          <Select value={settings.sourceLang} onValueChange={(v) => update({ sourceLang: v })}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Auto">Auto-detect</SelectItem>
+              <SelectItem value="Multilingual">Multilingual (mixed speakers)</SelectItem>
+              {LANGUAGES.map((l) => (
+                <SelectItem key={l} value={l}>
+                  {l}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Pin a language if the high-accuracy pass mis-detects; pick Multilingual for meetings
+            that mix languages. Can be changed mid-session.
+          </p>
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Caption">
@@ -602,12 +683,10 @@ function SettingsContent(props: {
         />
         {settings.showTranslation ? (
           <div className="space-y-1.5">
-            <div className="text-xs text-muted-foreground">Translate into</div>
-            <Select
-              value={settings.targetLang}
-              disabled={active}
-              onValueChange={(v) => update({ targetLang: v })}
-            >
+            <div className="text-xs text-muted-foreground">
+              Translate into (changeable mid-session)
+            </div>
+            <Select value={settings.targetLang} onValueChange={(v) => update({ targetLang: v })}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>

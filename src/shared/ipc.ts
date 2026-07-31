@@ -7,6 +7,11 @@ export type NoteContent = 'both' | 'original' | 'translation'
 export interface Settings {
   /** Target output language (one of REALTIME_TRANSLATE_CODES). Source is auto-detected. */
   targetLang: string
+  /**
+   * Spoken (source) language, or 'Auto'. Pinning it stops the high-accuracy
+   * pass from mis-detecting the language on noisy/music-heavy chunks.
+   */
+  sourceLang: string
   /** Capture system (loopback) audio. */
   systemAudioEnabled: boolean
   /** Mix the microphone into the captured audio. */
@@ -45,6 +50,7 @@ export interface DisplayInfo {
 
 export const DEFAULT_SETTINGS: Settings = {
   targetLang: 'English',
+  sourceLang: 'Auto',
   systemAudioEnabled: true,
   micEnabled: false,
   fontSize: 30,
@@ -145,6 +151,8 @@ export interface TranscriptFileInfo {
   mtimeMs: number
   /** Display title (from the note's # heading; AI-generated after save). */
   title: string
+  /** True when session audio is stored, enabling re-transcription. */
+  hasAudio: boolean
 }
 
 /** IPC channel names. Suffix convention: nothing special, just unique strings. */
@@ -162,6 +170,7 @@ export const IPC = {
   readTranscript: 'transcripts:read',
   deleteTranscript: 'transcripts:delete',
   downloadTranscript: 'transcripts:download',
+  retranscribeTranscript: 'transcripts:retranscribe',
   listQuickStarts: 'quickstarts:list',
   saveQuickStart: 'quickstarts:save',
   deleteQuickStart: 'quickstarts:delete',

@@ -28,6 +28,7 @@ declare global {
       readTranscript(fileName: string): Promise<string>
       deleteTranscript(fileName: string): Promise<void>
       downloadTranscript(fileName: string): Promise<string>
+      retranscribeTranscript(fileName: string, language: string): Promise<void>
       listQuickStarts(): Promise<QuickStart[]>
       saveQuickStart(name: string): Promise<QuickStart[]>
       deleteQuickStart(name: string): Promise<QuickStart[]>

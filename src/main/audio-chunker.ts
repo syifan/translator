@@ -27,6 +27,11 @@ export interface AudioChunk {
   durationMs: number
 }
 
+export interface ChunkTargets {
+  firstMs: number
+  nextMs: number
+}
+
 export class AudioChunker {
   private parts: Int16Array[] = []
   private sampleCount = 0
@@ -34,7 +39,10 @@ export class AudioChunker {
   private peak = 0
   private firstChunkDone = false
 
-  constructor(private onChunk: (chunk: AudioChunk) => void) {}
+  constructor(
+    private onChunk: (chunk: AudioChunk) => void,
+    private targets: ChunkTargets = { firstMs: FIRST_TARGET_MS, nextMs: TARGET_MS },
+  ) {}
 
   append(buf: ArrayBuffer): void {
     const samples = new Int16Array(buf.slice(0))
@@ -48,7 +56,7 @@ export class AudioChunker {
     }
 
     const elapsedMs = (this.sampleCount / SAMPLE_RATE) * 1000
-    const target = this.firstChunkDone ? TARGET_MS : FIRST_TARGET_MS
+    const target = this.firstChunkDone ? this.targets.nextMs : this.targets.firstMs
     if (elapsedMs < target) return
     if (elapsedMs >= target + FORCE_EXTRA_MS || this.tailIsSilent()) {
       this.cut()

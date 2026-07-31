@@ -18,6 +18,7 @@ import { RealtimeTranslateClient } from './openai/realtime-translate'
 import { TranscriptionClient } from './openai/transcription'
 import { TranscriptLog } from './transcript-log'
 import { AudioChunker } from './audio-chunker'
+import { deleteAudio, saveChunkWav } from './audio-store'
 import { NoteRefiner } from './note-refiner'
 import { summarizeTitle } from './openai/summarize'
 import { basename } from 'node:path'
@@ -129,7 +130,7 @@ export class SessionManager {
         model: TRANSCRIBE_MODEL,
         onOpen: () => this.setStatus({ state: 'running' }),
         onDelta: (id, text) => {
-          this.emitUnit(id, text, '', false)
+          this.emitUnit(id, this.overlayTail(text), '', false)
           if (this.liveNotes) this.sendPartial(text, '')
         },
         onCompleted: (id, text) => {
@@ -137,7 +138,7 @@ export class SessionManager {
             this.log?.addLive(text, '')
             this.sendPartial('', '')
           }
-          this.emitUnit(id, text, '', true)
+          this.emitUnit(id, this.overlayTail(text), '', true)
         },
         onError: (message) => this.setStatus({ state: 'error', message }),
         onClose: () => {
@@ -234,8 +235,12 @@ export class SessionManager {
   }
 
   private emitRtLive(): void {
-    const n = Math.max(1, this.settings.maxLines)
-    this.emitUnit('rt:live', tailText(this.rtSrc, n), tailText(this.rtTrans, n), false)
+    this.emitUnit('rt:live', this.overlayTail(this.rtSrc), this.overlayTail(this.rtTrans), false)
+  }
+
+  /** The recent slice of a transcript that fits the overlay's line budget. */
+  private overlayTail(text: string): string {
+    return tailText(text, Math.max(1, this.settings.maxLines))
   }
 
   private emitUnit(key: string, original: string, translation: string, isFinal: boolean): void {
@@ -257,13 +262,36 @@ export class SessionManager {
     this.sendReplace(log) // clear the previous session's view
 
     if (this.settings.notesEnabled) {
-      const translateTo =
-        this.settings.showTranslation && this.noteMode !== 'original'
-          ? this.settings.targetLang
-          : null
-      const refiner = new NoteRefiner({ apiKey, log, translateTo })
+      // Read language options through the store so mid-session changes apply
+      // from the next chunk onward. (The translation toggle itself is locked
+      // during a session, so engine choice never changes mid-run.)
+      const translationOn = this.settings.showTranslation
+      const noteMode = this.noteMode
+      const refiner = new NoteRefiner({
+        apiKey,
+        log,
+        translateTo: () =>
+          translationOn && noteMode !== 'original' ? store.get().targetLang : null,
+        languageCode: () => REALTIME_TRANSLATE_CODES[store.get().sourceLang] ?? null,
+        multilingual: () => store.get().sourceLang === 'Multilingual',
+      })
       this.refiner = refiner
-      this.recorder = new AudioChunker((chunk) => refiner.enqueue(chunk))
+      // Mixed-language meetings: shorter chunks track speaker turns better,
+      // so each chunk is more likely single-language.
+      const targets =
+        this.settings.sourceLang === 'Multilingual'
+          ? { firstMs: 60_000, nextMs: 120_000 }
+          : undefined
+      let chunkIndex = 0
+      this.recorder = new AudioChunker((chunk) => {
+        // Keep the audio so the note can be re-transcribed later.
+        if (chunk.wav) {
+          void saveChunkWav(log.stem, chunkIndex++, chunk.startMs, chunk.endMs, chunk.wav).catch(
+            (err) => console.error('[session] chunk audio save failed:', err),
+          )
+        }
+        refiner.enqueue(chunk)
+      }, targets)
     }
   }
 
@@ -318,7 +346,17 @@ export class SessionManager {
       // discard the current session's note.
       const save = store.get().notesEnabled
       const path = await log.finish(save)
-      if (!save) console.log('[session] note taking disabled — transcript not saved')
+      if (!save) {
+        console.log('[session] note taking disabled — transcript not saved')
+        // An unsaved session leaves nothing behind: clear the window and
+        // drop any audio chunks written before saving was switched off.
+        await deleteAudio(log.stem)
+        if (this.activeLog === log) {
+          this.activeLog = null
+          this.send(this.windows.control, IPC.transcriptReplace, [])
+        }
+        return
+      }
       if (!path) return
       console.log('[session] transcript saved ->', path)
       this.notifySaved(path)
@@ -395,8 +433,25 @@ function splitSentences(text: string): { sentences: string[]; tail: string } {
   return { sentences, tail: text.slice(lastIndex).trim() }
 }
 
+/** Rough per-line character budget for the overlay (sized for CJK glyphs). */
+const LINE_CHAR_BUDGET = 42
+
 /** The most recent `maxSentences` complete sentences plus any in-progress tail. */
 function tailText(text: string, maxSentences = 2): string {
   const { sentences, tail } = splitSentences(text)
-  return [...sentences.slice(-maxSentences), tail].filter(Boolean).join(' ')
+  const joined = [...sentences.slice(-maxSentences), tail].filter(Boolean).join(' ')
+  // Continuous speech (especially CJK) can arrive without any terminal
+  // punctuation — "one sentence" grows unbounded. Enforce a character
+  // budget so the caption never exceeds roughly the configured line count.
+  return clampTail(joined, maxSentences * LINE_CHAR_BUDGET)
+}
+
+/** Keep at most ~maxChars from the end, starting after a soft boundary. */
+function clampTail(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text
+  const cut = text.slice(-maxChars)
+  // Open the window after a comma/pause mark so we don't start mid-clause;
+  // only look in the first half so we keep at least half the budget.
+  const m = /[,，、;；:：\s]+/.exec(cut.slice(0, Math.floor(maxChars / 2)))
+  return m ? cut.slice(m.index + m[0].length) : cut
 }

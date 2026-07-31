@@ -6,11 +6,17 @@ import { translateLines } from './openai/translate-text'
 const MAX_ATTEMPTS = 3
 const RETRY_DELAYS_MS = [5_000, 15_000]
 
+// Language/translation options are getters so mid-session settings changes
+// apply to every chunk processed after the change.
 export interface RefinerOptions {
   apiKey: string
   log: TranscriptLog
   /** Target language name for note translation, or null to skip translating. */
-  translateTo: string | null
+  translateTo: () => string | null
+  /** ISO code pinning the spoken language, or null for auto-detect. */
+  languageCode: () => string | null
+  /** Mixed-language meeting mode: per-chunk detect, no prompt carryover. */
+  multilingual: () => boolean
 }
 
 /**
@@ -23,6 +29,7 @@ export class NoteRefiner {
   private queue: AudioChunk[] = []
   private running = false
   private prevTail = ''
+  private prevLanguage: string | null = null
 
   constructor(private opts: RefinerOptions) {}
 
@@ -79,13 +86,23 @@ export class NoteRefiner {
   }
 
   private async process(chunk: AudioChunk): Promise<void> {
-    const segs = await batchTranscribe(this.opts.apiKey, chunk.wav!, this.prevTail)
+    const languageCode = this.opts.languageCode()
+    const multilingual = this.opts.multilingual()
+    const { segments: segs, language } = await batchTranscribe(
+      this.opts.apiKey,
+      chunk.wav!,
+      // A prompt in language A would bias a language-B chunk — skip it when
+      // speakers mix languages.
+      multilingual ? undefined : this.prevTail,
+      languageCode ?? undefined,
+    )
+    const translateTo = this.opts.translateTo()
     let translations: string[] | null = null
-    if (this.opts.translateTo && segs.length > 0) {
+    if (translateTo && segs.length > 0) {
       translations = await translateLines(
         this.opts.apiKey,
         segs.map((s) => s.text),
-        this.opts.translateTo,
+        translateTo,
       )
     }
     this.opts.log.mergeRefined(
@@ -97,9 +114,19 @@ export class NoteRefiner {
         translation: translations?.[i] ?? '',
       })),
     )
-    this.prevTail = segs.map((s) => s.text).join(' ').slice(-800)
+    // Anti-cascade guard (auto-detect only): whisper occasionally mis-detects
+    // a noisy chunk's language; carrying its tail as the next prompt would
+    // spread the wrong language to every later chunk. On a language flip,
+    // drop the carryover so the next chunk detects fresh.
+    if (!languageCode && this.prevLanguage && language && language !== this.prevLanguage) {
+      console.warn(`[refiner] language flipped ${this.prevLanguage} -> ${language}; resetting prompt carryover`)
+      this.prevTail = ''
+    } else {
+      this.prevTail = segs.map((s) => s.text).join(' ').slice(-800)
+    }
+    this.prevLanguage = language
     console.log(
-      `[refiner] refined ${Math.round(chunk.durationMs / 1000)}s chunk -> ${segs.length} segments`,
+      `[refiner] refined ${Math.round(chunk.durationMs / 1000)}s chunk -> ${segs.length} segments (${language ?? 'unknown'})`,
     )
   }
 }

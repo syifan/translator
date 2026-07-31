@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { mkdir, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { NoteContent } from '@shared/ipc'
+import { store } from './store'
 
 /** Where saved session transcripts live (inside Electron's userData dir). */
 export function transcriptsDir(): string {
@@ -39,6 +40,8 @@ export class TranscriptLog {
   private refinedEntries: TranscriptEntry[] = []
   private covered: CoveredRange[] = []
   private startedAt = new Date()
+  /** File stem ("2026-07-22 14-30-05") — names the note and its audio dir. */
+  readonly stem = fileStamp(this.startedAt)
   private title: string | null = null
   private filePath: string | null = null
   private flushTimer: ReturnType<typeof setTimeout> | null = null
@@ -101,6 +104,9 @@ export class TranscriptLog {
 
   /** Debounced incremental write — keeps the on-disk note crash-safe. */
   requestFlush(): void {
+    // With note saving off, never touch the disk — "not saved" must not
+    // mean "written and deleted later" (a crash would leak the file).
+    if (!store.get().notesEnabled) return
     if (this.finished || this.flushTimer) return
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null
@@ -113,7 +119,7 @@ export class TranscriptLog {
     if (!this.filePath) {
       const dir = transcriptsDir()
       await mkdir(dir, { recursive: true })
-      this.filePath = join(dir, `${fileStamp(this.startedAt)}.md`)
+      this.filePath = join(dir, `${this.stem}.md`)
     }
     await writeFile(this.filePath, this.toMarkdown(), 'utf8')
     return this.filePath
@@ -155,16 +161,24 @@ export class TranscriptLog {
 
   private toMarkdown(): string {
     const heading = this.title ?? `Transcript — ${humanStamp(this.startedAt)}`
-    const lines: string[] = [`# ${heading}`, '']
-    for (const e of this.entries()) {
-      const clock = e.time.toTimeString().slice(0, 8)
-      if (e.original) lines.push(`**[${clock}]** ${e.original}`)
-      else lines.push(`**[${clock}]**`)
-      if (e.translation) lines.push(`> ${e.translation}`)
-      lines.push('')
-    }
-    return lines.join('\n')
+    return renderMarkdown(heading, this.entries())
   }
+}
+
+/** Shared note format — used by live sessions and re-transcription alike. */
+export function renderMarkdown(
+  heading: string,
+  entries: { time: Date; original: string; translation: string }[],
+): string {
+  const lines: string[] = [`# ${heading}`, '']
+  for (const e of entries) {
+    const clock = e.time.toTimeString().slice(0, 8)
+    if (e.original) lines.push(`**[${clock}]** ${e.original}`)
+    else lines.push(`**[${clock}]**`)
+    if (e.translation) lines.push(`> ${e.translation}`)
+    lines.push('')
+  }
+  return lines.join('\n')
 }
 
 function pad(n: number): string {

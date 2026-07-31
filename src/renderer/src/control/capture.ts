@@ -2,11 +2,31 @@
 // invoked from a user gesture). System loopback audio + optional mic are mixed,
 // resampled to 24kHz mono PCM16 by an AudioWorklet, and streamed to main.
 
+// The AudioContext (and its loaded worklet module) persist for the app's
+// lifetime — suspended while idle — so session start skips their setup cost.
 let audioCtx: AudioContext | null = null
+let moduleLoaded = false
 let worklet: AudioWorkletNode | null = null
 let streams: MediaStream[] = []
 let nodes: AudioNode[] = []
 let running = false
+
+async function ensureAudioCtx(): Promise<AudioContext> {
+  if (!audioCtx) audioCtx = new AudioContext()
+  if (!moduleLoaded) {
+    const workletUrl = new URL('pcm-worklet.js', location.href).toString()
+    await audioCtx.audioWorklet.addModule(workletUrl)
+    moduleLoaded = true
+  }
+  return audioCtx
+}
+
+/** Load the audio graph machinery ahead of time (call at app launch). */
+export function prewarmCapture(): void {
+  void ensureAudioCtx()
+    .then((ctx) => ctx.suspend())
+    .catch((err) => console.warn('[capture] prewarm failed:', err))
+}
 
 export function isCapturing(): boolean {
   return running
@@ -44,11 +64,9 @@ export async function startCapture({ system, mic }: CaptureInputs): Promise<void
       streams.push(sysStream)
     }
 
-    // 2) Web Audio graph + the resampling worklet.
-    audioCtx = new AudioContext()
-    const workletUrl = new URL('pcm-worklet.js', location.href).toString()
-    await audioCtx.audioWorklet.addModule(workletUrl)
-    worklet = new AudioWorkletNode(audioCtx, 'pcm-downsampler', {
+    // 2) Web Audio graph + the resampling worklet (pre-warmed at launch).
+    const ctx = await ensureAudioCtx()
+    worklet = new AudioWorkletNode(ctx, 'pcm-downsampler', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
       outputChannelCount: [1],
@@ -58,12 +76,12 @@ export async function startCapture({ system, mic }: CaptureInputs): Promise<void
       window.capture.sendAudio(ev.data as ArrayBuffer)
     }
 
-    const mixer = audioCtx.createGain()
+    const mixer = ctx.createGain()
     mixer.gain.value = 1
     nodes.push(mixer)
 
     if (sysStream) {
-      const sysSource = audioCtx.createMediaStreamSource(sysStream)
+      const sysSource = ctx.createMediaStreamSource(sysStream)
       sysSource.connect(mixer)
       nodes.push(sysSource)
     }
@@ -74,7 +92,7 @@ export async function startCapture({ system, mic }: CaptureInputs): Promise<void
         audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true },
       })
       streams.push(micStream)
-      const micSource = audioCtx.createMediaStreamSource(micStream)
+      const micSource = ctx.createMediaStreamSource(micStream)
       micSource.connect(mixer)
       nodes.push(micSource)
     }
@@ -83,13 +101,21 @@ export async function startCapture({ system, mic }: CaptureInputs): Promise<void
     // The worklet only runs while it's part of a graph reaching the
     // destination. Route its (silent) output through a zero-gain node so it
     // keeps processing without producing any audible sound or feedback.
-    const sink = audioCtx.createGain()
+    const sink = ctx.createGain()
     sink.gain.value = 0
     nodes.push(sink)
     worklet.connect(sink)
-    sink.connect(audioCtx.destination)
+    sink.connect(ctx.destination)
 
-    await audioCtx.resume()
+    await ctx.resume()
+
+    // The session may have errored while we were setting up (start runs
+    // capture + socket in parallel); don't leave a live tap behind. Return
+    // silently — the session's own error is already on screen.
+    if (!running) {
+      await stopCapture()
+      return
+    }
   } catch (err) {
     await stopCapture()
     throw err
@@ -117,12 +143,13 @@ export async function stopCapture(): Promise<void> {
   nodes = []
   for (const s of streams) s.getTracks().forEach((t) => t.stop())
   streams = []
+  // Keep the context (and its loaded worklet module) for the next session;
+  // suspending stops all processing without paying the setup cost again.
   if (audioCtx) {
     try {
-      await audioCtx.close()
+      await audioCtx.suspend()
     } catch {
       /* ignore */
     }
-    audioCtx = null
   }
 }
